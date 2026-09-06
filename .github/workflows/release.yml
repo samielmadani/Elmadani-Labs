@@ -96,6 +96,17 @@ jobs:
           ./gradlew assembleRelease --no-daemon
           test -f app/build/outputs/apk/release/app-release.apk
 
+      - name: Extract app metadata
+        run: |
+          set -euo pipefail
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          badging=$($build_tools/aapt dump badging app/build/outputs/apk/release/app-release.apk)
+          package_name=$(printf '%s\n' "$badging" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")
+          version_name=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionName='\\([^']*\\)'.*/\\1/p")
+          version_code=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionCode='\\([^']*\\)'.*/\\1/p")
+          test -n "$package_name" && test -n "$version_name" && test -n "$version_code"
+          printf '{"packageName":"%s","versionName":"%s","versionCode":%s}\n' "$package_name" "$version_name" "$version_code" > app/build/outputs/apk/release/elmadani-app.json
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,6 +120,7 @@ jobs:
           apk_path="app/build/outputs/apk/release/app-release.apk"
           release_notes=$(printf '## Elmadani Labs %s\n\n- Version: `%s`\n- Version code: `%s`\n- Commit: `%s`\n- Build date: `%s`\n- APK: `%s`\n\n### Changes\n' "$RELEASE_TAG" "$VERSION_NAME" "$VERSION_CODE" "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ASSET_NAME")
           gh release create "$RELEASE_TAG" "$apk_path#$ASSET_NAME" \
+            "app/build/outputs/apk/release/elmadani-app.json#elmadani-app.json" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Elmadani Labs $RELEASE_TAG" \
             --generate-notes \

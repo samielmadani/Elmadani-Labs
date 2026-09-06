@@ -285,7 +285,11 @@ class CatalogueRepository(private val context: Context) {
                 val name = asset.optString("name").lowercase(Locale.US)
                 name.endsWith(".png") || name.endsWith(".webp") || name.endsWith(".jpg") || name.endsWith(".jpeg")
             }?.optString("browser_download_url").orEmpty().ifBlank { config.iconUrl.orEmpty() }
-        return ReleaseApp(config.copy(iconUrl = metadataIcon.ifBlank { null }), release.optString("tag_name"), release.optString("tag_name"),
+        val metadata = (0 until assets.length()).map { assets.getJSONObject(it) }
+            .firstOrNull { it.optString("name").equals("elmadani-app.json", ignoreCase = true) }
+            ?.let { asset -> getJsonObject(asset.optString("url"), "metadata-${config.owner}-${config.repo}-${release.optString("tag_name")}") }
+        val packageName = metadata?.optString("packageName").orEmpty().ifBlank { config.packageName.orEmpty() }.ifBlank { null }
+        return ReleaseApp(config.copy(packageName = packageName, iconUrl = metadataIcon.ifBlank { null }), release.optString("tag_name"), release.optString("tag_name"),
             release.optString("body"), release.optString("published_at"), apk.getString("name"),
             apk.optLong("size"), apk.getString("browser_download_url"),
             "https://github.com/${config.owner}/${config.repo}",
@@ -308,6 +312,22 @@ class CatalogueRepository(private val context: Context) {
                 JSONArray(body)
             }
         }.getOrNull()
+    }
+
+    private fun getJsonObject(url: String, cacheKey: String): JSONObject? {
+        if (url.isBlank()) return null
+        val bodyKey = "body-$cacheKey"
+        return runCatching {
+            val request = authenticatedRequest(url).header("Accept", "application/json").build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string().orEmpty()
+                preferences.edit().putString(bodyKey, body).apply()
+                JSONObject(body)
+            }
+        }.getOrElse {
+            preferences.getString(bodyKey, null)?.let(::JSONObject)
+        }
     }
 
     private fun releaseToJson(app: ReleaseApp) = JSONObject().apply {
@@ -407,14 +427,20 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
     }
 
     private fun withInstalled(apps: List<ReleaseApp>) = apps.map { app ->
-        val packageName = app.config.packageName ?: return@map app
+        val packageName = app.config.packageName ?: findInstalledPackage(app) ?: return@map app
         runCatching {
             val info = context.packageManager.getPackageInfo(packageName, 0)
-            ReleaseApp(app.config, app.version, app.tag, app.notes, app.publishedAt, app.assetName, app.assetSize,
+            ReleaseApp(app.config.copy(packageName = packageName), app.version, app.tag, app.notes, app.publishedAt, app.assetName, app.assetSize,
                 app.downloadUrl, app.repositoryUrl, app.discoveredAt, info.versionName,
                 if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong(), assetApiUrl = app.assetApiUrl)
         }.getOrDefault(app)
     }
+
+    private fun findInstalledPackage(app: ReleaseApp): String? = context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        .firstOrNull { info ->
+            val label = context.packageManager.getApplicationLabel(info).toString()
+            label.equals(app.config.name, ignoreCase = true) || info.packageName.substringAfterLast('.').equals(app.config.repo, ignoreCase = true)
+        }?.packageName
 }
 
 class MainActivity : ComponentActivity() {
