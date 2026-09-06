@@ -578,7 +578,7 @@ private fun FloatingDock(selected: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-private fun DockItem(selected: Boolean, icon: androidx.compose.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {
+private fun DockItem(selected: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
         Icon(icon, description, Modifier.padding(horizontal = 22.dp, vertical = 12.dp).size(23.dp), tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
     }
