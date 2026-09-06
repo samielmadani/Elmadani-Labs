@@ -106,9 +106,10 @@ jobs:
           version_code=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionCode='\\([^']*\\)'.*/\\1/p")
           test -n "$package_name" && test -n "$version_name" && test -n "$version_code"
           printf '{"packageName":"%s","versionName":"%s","versionCode":%s}\n' "$package_name" "$version_name" "$version_code" > app/build/outputs/apk/release/elmadani-app.json
-          python3 -c 'import pathlib,sys,zipfile; apk_path,icon_path=sys.argv[1:]; apk=zipfile.ZipFile(apk_path); candidates=[(info.file_size,info.filename) for info in apk.infolist() if info.filename.lower().endswith(".png") and info.filename.startswith(("res/mipmap","res/drawable"))]; selected=max(candidates)[1] if candidates else (_ for _ in ()).throw(SystemExit("No PNG application icon found in APK")); pathlib.Path(icon_path).write_bytes(apk.read(selected)); apk.close()' \
+          python3 -c 'import pathlib,sys,zipfile; apk_path,icon_path,source_icon=sys.argv[1:]; apk=zipfile.ZipFile(apk_path); candidates=[(info.file_size,info.filename) for info in apk.infolist() if info.filename.lower().endswith(".png") and info.filename.startswith(("res/mipmap","res/drawable"))]; selected=max(candidates)[1] if candidates else None; pathlib.Path(icon_path).write_bytes(apk.read(selected) if selected else pathlib.Path(source_icon).read_bytes()); apk.close()' \
             app/build/outputs/apk/release/app-release.apk \
-            app/build/outputs/apk/release/elmadani-app-icon.png
+            app/build/outputs/apk/release/elmadani-app-icon.png \
+            app/src/main/res/drawable/icon.png
 
       - name: Publish GitHub Release
         env:
