@@ -653,11 +653,10 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
     val context = androidx.compose.ui.platform.LocalContext.current
     var progress by remember { mutableStateOf<Int?>(null) }
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }; AppIcon(app, 96); Spacer(Modifier.height(12.dp)); Text(displayName(app.config.name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(18.dp)); AppStatus(app); Text("${app.version}  •  ${formatSize(app.assetSize)}  •  ${app.publishedAt.take(10)}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp));
-        AnimatedContent(progress, label = "download state") { currentProgress ->
-            if (currentProgress != null) {
-                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
-            } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
-        }
+        if (progress != null) {
+            val currentProgress = progress!!.coerceIn(0, 100)
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
+        } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
         if (app.isInstalled && !app.updateAvailable) TextButton(onClick = { context.startActivity(context.packageManager.getLaunchIntentForPackage(app.config.packageName.orEmpty())) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open") }
         Spacer(Modifier.height(20.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
     }
@@ -707,7 +706,10 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
             Text(latest.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.updateAvailable) {
                 var progress by remember { mutableStateOf<Int?>(null) }
-                AnimatedContent(progress, label = "self update state", modifier = Modifier.padding(top = 20.dp)) { currentProgress -> if (currentProgress == null) Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ value -> progress = value.takeIf { it >= 0 } }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") } else Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) } }
+                if (progress != null) {
+                    val currentProgress = progress!!.coerceIn(0, 100)
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.padding(top = 20.dp).fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) }
+                } else Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.padding(top = 20.dp).fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") }
             }
         }
     }
