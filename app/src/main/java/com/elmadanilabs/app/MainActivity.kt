@@ -498,8 +498,9 @@ class MainActivity : ComponentActivity() {
 
     private fun openInstaller(file: File) {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
-        startActivityForResult(Intent(Intent.ACTION_VIEW).apply {
+        startActivityForResult(Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
+            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newRawUri("APK", uri)
         }, 42)
@@ -577,7 +578,7 @@ private fun FloatingDock(selected: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-private fun DockItem(selected: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {
+private fun DockItem(selected: Boolean, icon: androidx.compose.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
         Icon(icon, description, Modifier.padding(horizontal = 22.dp, vertical = 12.dp).size(23.dp), tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
     }
