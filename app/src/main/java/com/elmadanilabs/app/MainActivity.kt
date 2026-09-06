@@ -7,10 +7,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +26,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +41,8 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,7 +52,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -57,6 +68,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,6 +81,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.FileProvider
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -448,6 +467,7 @@ class MainActivity : ComponentActivity() {
     private var pendingInstall: File? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         viewModel = ViewModelProvider(this, object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>) = CatalogueViewModel(CatalogueRepository(applicationContext), applicationContext) as T
         })[CatalogueViewModel::class.java]
@@ -475,6 +495,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ElmadaniLabsApp(viewModel: CatalogueViewModel) {
     val state by viewModel.state.collectAsState()
@@ -491,46 +512,99 @@ fun ElmadaniLabsApp(viewModel: CatalogueViewModel) {
         androidx.compose.material3.lightColorScheme(primary = Color(0xFF9A4D00), secondary = Color(0xFF2E6B59), background = Color(0xFFF8F9F6), surface = Color.White)
     }
     MaterialTheme(colorScheme = colors) {
-        Scaffold(containerColor = MaterialTheme.colorScheme.background, bottomBar = {
-            NavigationBar {
-                NavigationBarItem(selected = tab == 0, onClick = { selected = null; showSelfUpdates = false; tab = 0 }, icon = { Icon(Icons.Default.Search, "Apps") }, label = { Text("Apps") })
-                NavigationBarItem(selected = tab == 1, onClick = { selected = null; showSelfUpdates = false; tab = 1 }, icon = { Icon(Icons.Default.Settings, "Settings") }, label = { Text("Settings") })
-            }
+        val refreshState = rememberPullToRefreshState()
+        Scaffold(containerColor = MaterialTheme.colorScheme.background, contentWindowInsets = WindowInsets(0), bottomBar = {
+            FloatingDock(tab) { destination -> selected = null; showSelfUpdates = false; tab = destination }
         }) { padding ->
-            when {
-                selected != null -> DetailScreen(selected!!, viewModel, Modifier.padding(padding)) { selected = null }
-                showSelfUpdates -> SelfUpdateScreen(selfUpdate, viewModel, Modifier.padding(padding)) { showSelfUpdates = false }
-                tab == 1 -> SettingsScreen(state, viewModel, Modifier.padding(padding)) { showSelfUpdates = true }
-                else -> HomeScreen(filtered, state, query, { query = it }, { viewModel.refresh(false) }, { selected = it }, Modifier.padding(padding))
+            PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = { viewModel.refresh(false) }, state = refreshState, modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
+                when {
+                    showSelfUpdates -> SelfUpdateScreen(selfUpdate, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = false }
+                    tab == 1 -> SettingsScreen(state, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = true }
+                    else -> HomeScreen(filtered, state, query, { query = it }, { viewModel.refresh(false) }, { selected = it }, Modifier.fillMaxSize().padding(horizontal = 20.dp))
+                }
+            }
+        }
+        selected?.let { app ->
+            ModalBottomSheet(onDismissRequest = { selected = null }, containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
+                DetailScreen(app, viewModel, Modifier.padding(horizontal = 20.dp)) { selected = null }
             }
         }
     }
 }
 
 @Composable
+private fun FloatingDock(selected: Int, onSelect: (Int) -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 14.dp), contentAlignment = Alignment.Center) {
+        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 3.dp) {
+            Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                DockItem(selected == 0, Icons.Default.Search, "Apps") { onSelect(0) }
+                DockItem(selected == 1, Icons.Default.Settings, "Settings") { onSelect(1) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DockItem(selected: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
+        Icon(icon, description, Modifier.padding(horizontal = 22.dp, vertical = 12.dp).size(23.dp), tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: String, onQuery: (String) -> Unit, onRefresh: () -> Unit, onSelect: (ReleaseApp) -> Unit, modifier: Modifier) {
-    Column(modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(24.dp)); Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxSize().padding(top = 26.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("ELMADANI LABS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); Text("Apps", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Refresh") }
         }
-        Spacer(Modifier.height(16.dp)); SearchField(query, onQuery); Spacer(Modifier.height(12.dp))
-        if (state.refreshing) LinearStatus("Refreshing apps")
-        state.message?.takeUnless { it.contains("no eligible", true) }?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
-        if (!state.loading && apps.isEmpty()) EmptyState("No apps available", "Published applications will appear here")
-        if (apps.isNotEmpty()) Text("All applications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) { items(apps, key = { it.config.repo }) { AppCard(it, onSelect) } }
+        Spacer(Modifier.height(18.dp)); SearchField(query, onQuery); Spacer(Modifier.height(10.dp))
+        AnimatedVisibility(state.loading, enter = fadeIn(), exit = fadeOut()) { SkeletonList() }
+        AnimatedVisibility(!state.loading, enter = fadeIn(), exit = fadeOut()) {
+            Column {
+                FriendlyMessage(state.message, onRefresh)
+                if (apps.isEmpty()) EmptyState(if (query.isBlank()) "No apps available" else "No matching apps", "Pull down to refresh and check for new applications.", onRefresh)
+                if (apps.isNotEmpty()) Text("All applications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 12.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) { items(apps, key = { it.config.repo }) { AppCard(it, onSelect) } }
+            }
+        }
     }
 }
 
 @Composable private fun SearchField(value: String, onValueChange: (String) -> Unit) {
-    androidx.compose.material3.OutlinedTextField(value, onValueChange, modifier = Modifier.fillMaxWidth(), singleLine = true, leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("Search apps") }, shape = RoundedCornerShape(14.dp))
+    androidx.compose.material3.TextField(value, onValueChange, modifier = Modifier.fillMaxWidth(), singleLine = true, leadingIcon = { Icon(Icons.Default.Search, "Search") }, trailingIcon = { if (value.isNotEmpty()) IconButton(onClick = { onValueChange("") }) { Icon(Icons.Default.Close, "Clear search") } }, placeholder = { Text("Search apps") }, shape = RoundedCornerShape(18.dp), colors = androidx.compose.material3.TextFieldDefaults.colors(unfocusedIndicatorColor = Color.Transparent, focusedIndicatorColor = Color.Transparent))
+}
+
+@Composable private fun FriendlyMessage(message: String?, onRetry: () -> Unit) {
+    if (message == null || message.contains("No published", true) || message.contains("No repositories", true)) return
+    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.ErrorOutline, "Error", tint = MaterialTheme.colorScheme.onErrorContainer); Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) { Text("Couldn't refresh apps", fontWeight = FontWeight.SemiBold); Text("Check your connection and try again.", style = MaterialTheme.typography.bodySmall) }
+            TextButton(onClick = onRetry) { Text("Retry") }
+        }
+    }
+}
+
+@Composable private fun SkeletonList() {
+    Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        repeat(4) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(68.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp)))
+                Spacer(Modifier.width(16.dp)); Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(150.dp, 16.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)))
+                    Box(Modifier.size(210.dp, 12.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)))
+                    Box(Modifier.size(92.dp, 12.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)))
+                }
+            }
+        }
+    }
 }
 
 @Composable private fun AppCard(app: ReleaseApp, onSelect: (ReleaseApp) -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable { onSelect(app) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+    Surface(Modifier.fillMaxWidth().clickable { onSelect(app) }, color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp), tonalElevation = 1.dp) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            AppIcon(app, 64); Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) {
+            AppIcon(app, 68); Spacer(Modifier.width(16.dp)); Column(Modifier.weight(1f)) {
                 Text(app.config.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
                 Text(app.config.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(6.dp)); AppStatus(app)
@@ -554,53 +628,69 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
 @Composable private fun DetailScreen(app: ReleaseApp, viewModel: CatalogueViewModel, modifier: Modifier, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var progress by remember { mutableStateOf<Int?>(null) }
-    Column(modifier.fillMaxSize().padding(20.dp)) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }; AppIcon(app, 92); Spacer(Modifier.height(12.dp)); Text(app.config.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Text(app.config.description, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(18.dp)); AppStatus(app); Text("${app.version}  •  ${formatSize(app.assetSize)}  •  ${app.publishedAt.take(10)}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp));
-        Button(onClick = { progress = 0; viewModel.install(app, { progress = it }) { file -> viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = progress == null && (!app.isInstalled || app.updateAvailable), modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }; AppIcon(app, 96); Spacer(Modifier.height(12.dp)); Text(app.config.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Text(app.config.description, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(18.dp)); AppStatus(app); Text("${app.version}  •  ${formatSize(app.assetSize)}  •  ${app.publishedAt.take(10)}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp));
+        AnimatedContent(progress, label = "download state") { currentProgress ->
+            if (currentProgress != null) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
+            } else Button(onClick = { progress = 0; viewModel.install(app, { progress = it }) { file -> viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
+        }
         if (app.isInstalled && !app.updateAvailable) TextButton(onClick = { context.startActivity(context.packageManager.getLaunchIntentForPackage(app.config.packageName.orEmpty())) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open") }
-        progress?.let { LinearStatus("Downloading APK: $it%") }; Spacer(Modifier.height(20.dp)); Text("Release notes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(app.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
+        Spacer(Modifier.height(20.dp)); Text("Release notes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(app.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
     }
 }
 
 @Composable private fun SettingsScreen(state: CatalogueState, viewModel: CatalogueViewModel, modifier: Modifier, onOpenSelfUpdates: () -> Unit) {
     var includePrereleases by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
-    Column(modifier.fillMaxSize().padding(20.dp)) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 26.dp, bottom = 28.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(24.dp))
-        Text("GitHub access", style = MaterialTheme.typography.titleLarge)
-        Text("Use a personal access token to access private repositories. It is encrypted on this device and never logged.", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 6.dp))
-        androidx.compose.material3.OutlinedTextField(value = token, onValueChange = { token = it }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, label = { Text("GitHub token") }, visualTransformation = PasswordVisualTransformation())
-        TextButton(onClick = { viewModel.saveGithubToken(token); token = "" }) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Save token and refresh") }
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show prerelease GitHub releases", color = Color(0xFF9BA9B8)) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }
-        Divider(Modifier.padding(vertical = 20.dp)); Text("Cache", style = MaterialTheme.typography.titleLarge); TextButton(onClick = { viewModel.clearCache() }) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Clear cached release information") }; Divider(Modifier.padding(vertical = 12.dp)); Text("About", style = MaterialTheme.typography.titleLarge); Text("Elmadani Labs\nVersion ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp)); TextButton(onClick = onOpenSelfUpdates) { Icon(Icons.Default.Info, null); Spacer(Modifier.width(6.dp)); Text("Updates") }
+        Spacer(Modifier.height(28.dp)); Text("GENERAL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        PreferenceRow(Icons.Default.Info, "GitHub access", "Private repository access")
+        androidx.compose.material3.OutlinedTextField(value = token, onValueChange = { token = it }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), singleLine = true, label = { Text("Access token") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp))
+        TextButton(onClick = { viewModel.saveGithubToken(token); token = "" }) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Save and refresh") }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Download, "Prereleases", tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show early releases", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }
+        Spacer(Modifier.height(24.dp)); Text("STORAGE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        PreferenceRow(Icons.Default.Storage, "Cached apps", "Clear saved release information") { viewModel.clearCache() }
+        Spacer(Modifier.height(24.dp)); Text("ABOUT", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        PreferenceRow(Icons.Default.Info, "Elmadani Labs", "Version ${BuildConfig.VERSION_NAME}")
+        PreferenceRow(Icons.Default.Refresh, "Updates", "Check for a new Elmadani Labs version", onOpenSelfUpdates)
     }
+}
+
+@Composable private fun PreferenceRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null) {
+    Surface(onClick = { onClick?.invoke() }, enabled = onClick != null, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, title, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(16.dp)); Column { Text(title, style = MaterialTheme.typography.bodyLarge); Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) } } }
 }
 
 @Composable private fun SelfUpdateScreen(state: SelfUpdateState, viewModel: CatalogueViewModel, modifier: Modifier, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    Column(modifier.fillMaxSize().padding(20.dp)) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 18.dp, bottom = 28.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+        AppIcon(null, 88)
         Text("Elmadani Labs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Current version\nv${state.currentVersion}", color = Color(0xFFB6C3D1), modifier = Modifier.padding(top = 16.dp))
-        Spacer(Modifier.height(20.dp))
-        Button(onClick = { viewModel.checkSelfUpdate() }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Check for updates") }
-        if (state.checking) LinearStatus("Checking GitHub Releases...")
-        state.message?.let { message -> Text(message, color = if (message == "Update available") MaterialTheme.colorScheme.primary else Color(0xFFB6C3D1), modifier = Modifier.padding(vertical = 16.dp)) }
+        Text("Version ${state.currentVersion}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(24.dp)); Button(onClick = { viewModel.checkSelfUpdate() }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Check for updates") }
+        if (state.checking) LinearStatus("Checking for updates")
+        state.message?.let { rawMessage ->
+            val hasUpdate = rawMessage == "Update available"
+            val isCurrent = rawMessage == "You're up to date"
+            val title = when { hasUpdate -> "Update available"; isCurrent -> "You're up to date"; else -> "Couldn't check for updates" }
+            val detail = when { hasUpdate -> "A new version is ready to install."; isCurrent -> "You're running the latest version."; else -> "Check your connection and try again." }
+            Surface(color = if (hasUpdate) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().padding(top = 18.dp)) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (hasUpdate) Icons.Default.Download else if (isCurrent) Icons.Default.CheckCircle else Icons.Default.ErrorOutline, "Update status"); Spacer(Modifier.width(12.dp)); Column { Text(title, fontWeight = FontWeight.SemiBold); Text(detail, style = MaterialTheme.typography.bodySmall) } } }
+        }
         state.latest?.let { latest ->
-            Text("New version\nv${latest.version.trimStart('v')}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Release date: ${latest.publishedAt.take(10)}", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp))
-            Text(latest.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 16.dp))
+            Text("${state.currentVersion}  →  ${latest.version.trimStart('v')}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp))
+            Text("Release notes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 24.dp))
+            Text(latest.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.updateAvailable) {
                 var progress by remember { mutableStateOf<Int?>(null) }
-                Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ progress = it }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, enabled = progress == null, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) { Text("Update") }
-                progress?.let { Text("Downloading update: $it%", modifier = Modifier.padding(top = 10.dp)) }
+                AnimatedContent(progress, label = "self update state", modifier = Modifier.padding(top = 20.dp)) { currentProgress -> if (currentProgress == null) Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ progress = it }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") } else Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) } }
             }
         }
     }
 }
-@Composable private fun AppIcon(app: ReleaseApp, size: Int) { if (app.config.iconUrl != null) AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, modifier = Modifier.size(size.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))) else Box(Modifier.size(size.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { Text(app.config.name.take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
+@Composable private fun AppIcon(app: ReleaseApp?, size: Int) { if (app?.config?.iconUrl != null) AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, modifier = Modifier.size(size.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))) else Box(Modifier.size(size.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Text(app?.config?.name?.take(1)?.uppercase() ?: "E", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
 @Composable private fun LinearStatus(text: String) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 10.dp)) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text(text, color = Color(0xFF9BA9B8)) } }
-@Composable private fun EmptyState(title: String, subtitle: String) { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)); Spacer(Modifier.height(8.dp)); Text(title, fontWeight = FontWeight.SemiBold); Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) } } }
+@Composable private fun EmptyState(title: String, subtitle: String, onRefresh: () -> Unit) { Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)); Spacer(Modifier.height(10.dp)); Text(title, fontWeight = FontWeight.SemiBold); Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall); TextButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Refresh") } } } }
 private fun formatSize(bytes: Long) = if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "%.1f MB".format(Locale.US, bytes / 1024f / 1024f)
 private fun extractVersionCode(notes: String): Int? = Regex("(?i)versionCode\\s*:\\s*(\\d+)").find(notes)?.groupValues?.getOrNull(1)?.toIntOrNull()
 private fun compareVersions(left: String, right: String): Int { val a = left.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; val b = right.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; for (i in 0 until maxOf(a.size, b.size)) { val result = (a.getOrElse(i) { 0 }).compareTo(b.getOrElse(i) { 0 }); if (result != 0) return result }; return 0 }
