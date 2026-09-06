@@ -1,4 +1,4 @@
-name: Release Elmadani Labs
+name: Release Elmadani
 
 on:
   push:

@@ -1,4 +1,4 @@
-# Elmadani Labs
+# Elmadani
 
 Private Android app catalogue backed by public GitHub Releases.
 

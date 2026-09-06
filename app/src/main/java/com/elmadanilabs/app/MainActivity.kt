@@ -224,7 +224,7 @@ class CatalogueRepository(private val context: Context) {
             val releases = getJsonArray("https://api.github.com/repos/$githubUsername/$selfRepository/releases?per_page=100&page=$page", "self-releases-$page")
                 ?: return null to when (lastApiStatus) {
                     401, 403 -> "GitHub rejected the token or its permissions."
-                    404 -> "Elmadani Labs is not reachable with this GitHub account."
+                    404 -> "Elmadani is not reachable with this GitHub account."
                     else -> "Unable to check for updates."
                 }
             val release = (0 until releases.length()).asSequence()
@@ -234,7 +234,7 @@ class CatalogueRepository(private val context: Context) {
                 val config = AppConfig(
                     owner = githubUsername,
                     repo = selfRepository,
-                    name = "Elmadani Labs",
+                    name = "Elmadani",
                     description = "Personal software distribution platform",
                     category = "System",
                     packageName = BuildConfig.APPLICATION_ID,
@@ -290,7 +290,7 @@ class CatalogueRepository(private val context: Context) {
             description = repository.optString("description").ifBlank { "Android application from $owner" },
             category = repository.optJSONArray("topics")?.optString(0)?.replaceFirstChar { it.uppercase() } ?: "Other",
             packageName = null,
-            iconUrl = null,
+            iconUrl = "https://raw.githubusercontent.com/$owner/$repo/main/public/icon-512.png",
             topics = repository.optJSONArray("topics")?.let { topics -> (0 until topics.length()).map { topics.optString(it) } } ?: emptyList()
         )
         var page = 1
@@ -512,7 +512,9 @@ class MainActivity : ComponentActivity() {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
         val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
+            putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, packageName)
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+            putExtra(Intent.EXTRA_RETURN_RESULT, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newRawUri("APK", uri)
         }
@@ -601,7 +603,7 @@ private fun DockItem(selected: Boolean, icon: androidx.compose.ui.graphics.vecto
 private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: String, onQuery: (String) -> Unit, onRefresh: () -> Unit, onSelect: (ReleaseApp) -> Unit, modifier: Modifier) {
     Column(modifier.fillMaxSize().padding(top = 26.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("Elmadani Labs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+            Column(Modifier.weight(1f)) { Text("Elmadani", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Refresh") }
         }
         Spacer(Modifier.height(18.dp)); SearchField(query, onQuery); Spacer(Modifier.height(10.dp))
@@ -696,8 +698,8 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
         Spacer(Modifier.height(24.dp)); Text("STORAGE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         PreferenceRow(Icons.Default.Storage, "Cached apps", "Clear saved release information") { viewModel.clearCache() }
         Spacer(Modifier.height(24.dp)); Text("ABOUT", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        PreferenceRow(Icons.Default.Info, "Elmadani Labs", "Version ${BuildConfig.VERSION_NAME}")
-        PreferenceRow(Icons.Default.Refresh, "Updates", "Check for a new Elmadani Labs version", onOpenSelfUpdates)
+        PreferenceRow(Icons.Default.Info, "Elmadani", "Version ${BuildConfig.VERSION_NAME}")
+        PreferenceRow(Icons.Default.Refresh, "Updates", "Check for a new Elmadani version", onOpenSelfUpdates)
     }
 }
 
@@ -710,7 +712,7 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 18.dp, bottom = 28.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
         AppIcon(null, 88)
-        Text("Elmadani Labs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Elmadani", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text("Version ${state.currentVersion}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(24.dp)); Button(onClick = { viewModel.checkSelfUpdate() }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Check for updates") }
         if (state.checking) LinearStatus("Checking for updates")
@@ -737,9 +739,9 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
 }
 @Composable private fun AppIcon(app: ReleaseApp?, size: Int) {
     if (app == null) {
-        androidx.compose.foundation.Image(painterResource(com.elmadanilabs.app.R.drawable.icon), "Elmadani Labs", Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Fit)
+        androidx.compose.foundation.Image(painterResource(com.elmadanilabs.app.R.drawable.icon), "Elmadani", Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Fit)
     } else if (app.config.iconUrl != null) {
-        AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, contentScale = ContentScale.Fit, modifier = Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
+        AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, contentScale = ContentScale.Fit, modifier = Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant), error = painterResource(com.elmadanilabs.app.R.drawable.icon))
     } else {
         Box(Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) { Text(app.config.name.take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
     }

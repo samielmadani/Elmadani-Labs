@@ -31,10 +31,8 @@ android {
             val keystorePassword = providers.environmentVariable("ELMADANI_KEYSTORE_PASSWORD").orNull
             val keyAliasValue = providers.environmentVariable("ELMADANI_KEY_ALIAS").orNull
             val keyPasswordValue = providers.environmentVariable("ELMADANI_KEY_PASSWORD").orNull
-            if (productionReleaseRequested) {
-                require(!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
-                    "Production release signing requires ELMADANI_KEYSTORE_PATH, ELMADANI_KEYSTORE_PASSWORD, ELMADANI_KEY_ALIAS, and ELMADANI_KEY_PASSWORD."
-                }
+            require(!productionReleaseRequested || (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank())) {
+                "Production release signing requires ELMADANI_KEYSTORE_PATH, ELMADANI_KEYSTORE_PASSWORD, ELMADANI_KEY_ALIAS, and ELMADANI_KEY_PASSWORD."
             }
             if (!keystorePath.isNullOrBlank()) {
                 storeFile = file(keystorePath)
@@ -45,6 +43,15 @@ android {
         }
     }
     buildTypes {
+        debug {
+            val keystorePath = providers.environmentVariable("ELMADANI_KEYSTORE_PATH").orNull
+            val keystorePassword = providers.environmentVariable("ELMADANI_KEYSTORE_PASSWORD").orNull
+            val keyAliasValue = providers.environmentVariable("ELMADANI_KEY_ALIAS").orNull
+            val keyPasswordValue = providers.environmentVariable("ELMADANI_KEY_PASSWORD").orNull
+            if (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             signingConfig = signingConfigs.getByName("release")
         }
