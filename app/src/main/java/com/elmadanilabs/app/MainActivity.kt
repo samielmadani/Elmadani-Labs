@@ -58,8 +58,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -101,7 +104,8 @@ data class ReleaseApp(
     val discoveredAt: Long = System.currentTimeMillis(),
     val installedVersion: String? = null,
     val installedVersionCode: Long? = null,
-    val error: String? = null
+    val error: String? = null,
+    val assetApiUrl: String? = null
 ) {
     val isInstalled: Boolean get() = installedVersion != null
     val updateAvailable: Boolean get() = isInstalled && compareVersions(version, installedVersion.orEmpty()) > 0
@@ -132,12 +136,32 @@ data class SelfUpdateState(
 class CatalogueRepository(private val context: Context) {
     private val client = OkHttpClient()
     private val preferences = context.getSharedPreferences("catalogue", Context.MODE_PRIVATE)
+    private val securePreferences by lazy {
+        val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(context, "github_auth", masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+    }
+    private var lastApiStatus = 0
     private val githubUsername: String by lazy {
         runCatching {
             context.assets.open("apps.json").bufferedReader().use { JSONObject(it.readText()).optString("githubUsername") }
         }.getOrDefault("samielmadani").ifBlank { "samielmadani" }
     }
     private val selfRepository = "Elmadani-Labs"
+
+    fun hasGithubToken(): Boolean = !securePreferences.getString("token", null).isNullOrBlank()
+    fun setGithubToken(token: String) {
+        if (token.isBlank()) securePreferences.edit().remove("token").apply()
+        else securePreferences.edit().putString("token", token.trim()).apply()
+    }
+
+    fun authenticatedRequest(url: String): Request.Builder = Request.Builder().url(url).apply {
+        header("User-Agent", "Elmadani-Labs")
+        securePreferences.getString("token", null)?.takeIf { it.isNotBlank() }?.let {
+            header("Authorization", "Bearer ${it.trim()}")
+        }
+    }
 
     fun cached(): List<ReleaseApp> = runCatching {
         val array = JSONArray(preferences.getString("apps", "[]"))
@@ -159,7 +183,11 @@ class CatalogueRepository(private val context: Context) {
         var page = 1
         while (true) {
             val releases = getJsonArray("https://api.github.com/repos/$githubUsername/$selfRepository/releases?per_page=100&page=$page", "self-releases-$page")
-                ?: return null to "Unable to check for updates."
+                ?: return null to when (lastApiStatus) {
+                    401, 403 -> "GitHub rejected the token or its permissions."
+                    404 -> "Elmadani Labs is not reachable with this GitHub account."
+                    else -> "Unable to check for updates."
+                }
             val release = (0 until releases.length()).asSequence()
                 .map { releases.getJSONObject(it) }
                 .firstOrNull { !it.optBoolean("draft") && (includePrereleases || !it.optBoolean("prerelease")) && hasApk(it) }
@@ -182,7 +210,11 @@ class CatalogueRepository(private val context: Context) {
 
     fun refresh(includePrereleases: Boolean): Pair<List<ReleaseApp>, String?> {
         val repositories = discoverRepositories()
-        if (repositories == null) return cached() to "Couldn't reach GitHub. Showing cached apps."
+        if (repositories == null) return cached() to when (lastApiStatus) {
+            401, 403 -> "GitHub rejected the token or its permissions. Showing cached apps."
+            else -> "Couldn't reach GitHub. Showing cached apps."
+        }
+        if (repositories.isEmpty()) return emptyList<ReleaseApp>() to if (hasGithubToken()) "No repositories found for this GitHub account." else "No public repositories found. Add a GitHub token for private repositories."
         val results = repositories.mapNotNull { repository -> fetchLatestApk(repository, includePrereleases) }
         save(results)
         return results to if (results.size < repositories.size) "Some repositories have no eligible APK release." else null
@@ -192,7 +224,12 @@ class CatalogueRepository(private val context: Context) {
         val repositories = mutableListOf<JSONObject>()
         var page = 1
         while (true) {
-            val pageData = getJsonArray("https://api.github.com/users/$githubUsername/repos?per_page=100&page=$page", "repos-$page") ?: return null
+            val endpoint = if (hasGithubToken()) {
+                "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$page"
+            } else {
+                "https://api.github.com/users/$githubUsername/repos?per_page=100&page=$page"
+            }
+            val pageData = getJsonArray(endpoint, "repos-$page") ?: return null
             for (index in 0 until pageData.length()) {
                 val repository = pageData.getJSONObject(index)
                 val owner = repository.optJSONObject("owner")?.optString("login").orEmpty()
@@ -241,16 +278,18 @@ class CatalogueRepository(private val context: Context) {
         return ReleaseApp(config, release.optString("tag_name"), release.optString("tag_name"),
             release.optString("body"), release.optString("published_at"), apk.getString("name"),
             apk.optLong("size"), apk.getString("browser_download_url"),
-            "https://github.com/${config.owner}/${config.repo}")
+            "https://github.com/${config.owner}/${config.repo}",
+            assetApiUrl = apk.optString("url").ifBlank { null })
     }
 
     private fun getJsonArray(url: String, cacheKey: String): JSONArray? {
         val etagKey = "etag-$cacheKey"
         val bodyKey = "body-$cacheKey"
-        val requestBuilder = Request.Builder().url(url).header("Accept", "application/vnd.github+json")
+        val requestBuilder = authenticatedRequest(url).header("Accept", "application/vnd.github+json")
         preferences.getString(etagKey, null)?.let { requestBuilder.header("If-None-Match", it) }
         return runCatching {
             client.newCall(requestBuilder.build()).execute().use { response ->
+                lastApiStatus = response.code
                 if (response.code == 304) return JSONArray(preferences.getString(bodyKey, "[]"))
                 if (!response.isSuccessful) return null
                 val body = response.body?.string().orEmpty()
@@ -266,7 +305,7 @@ class CatalogueRepository(private val context: Context) {
         put("description", app.config.description); put("category", app.config.category)
         put("packageName", app.config.packageName); put("iconUrl", app.config.iconUrl); put("topics", JSONArray(app.config.topics)); put("version", app.version); put("tag", app.tag)
         put("notes", app.notes); put("publishedAt", app.publishedAt); put("assetName", app.assetName)
-        put("assetSize", app.assetSize); put("downloadUrl", app.downloadUrl); put("repositoryUrl", app.repositoryUrl); put("discoveredAt", app.discoveredAt)
+        put("assetSize", app.assetSize); put("downloadUrl", app.downloadUrl); put("assetApiUrl", app.assetApiUrl); put("repositoryUrl", app.repositoryUrl); put("discoveredAt", app.discoveredAt)
     }
 
     private fun releaseFromJson(item: JSONObject): ReleaseApp {
@@ -274,7 +313,7 @@ class CatalogueRepository(private val context: Context) {
         val config = AppConfig(item.optString("owner"), item.optString("repo"), item.optString("name"), item.optString("description"), item.optString("category", "Other"), item.optString("packageName").ifBlank { null }, item.optString("iconUrl").ifBlank { null }, topics)
         return ReleaseApp(config, item.optString("version"), item.optString("tag"),
         item.optString("notes"), item.optString("publishedAt"), item.optString("assetName"), item.optLong("assetSize"),
-        item.optString("downloadUrl"), item.optString("repositoryUrl"), item.optLong("discoveredAt", System.currentTimeMillis()))
+        item.optString("downloadUrl"), item.optString("repositoryUrl"), item.optLong("discoveredAt", System.currentTimeMillis()), assetApiUrl = item.optString("assetApiUrl").ifBlank { null })
     }
 }
 
@@ -298,6 +337,11 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
 
     fun clearCache() { repository.clearCache(); _state.value = CatalogueState(loading = false) }
     fun refreshInstalled() { _state.value = _state.value.copy(apps = withInstalled(_state.value.apps)) }
+    fun hasGithubToken(): Boolean = repository.hasGithubToken()
+    fun saveGithubToken(token: String) {
+        repository.setGithubToken(token)
+        refresh(false)
+    }
 
     fun checkSelfUpdate(includePrereleases: Boolean = false) {
         _selfUpdate.value = _selfUpdate.value.copy(checking = true, message = null)
@@ -336,7 +380,10 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
         viewModelScope.launch(Dispatchers.IO) {
             val file = File(context.cacheDir, app.assetName)
             runCatching {
-                val response = OkHttpClient().newCall(Request.Builder().url(app.downloadUrl).build()).execute()
+                val request = repository.authenticatedRequest(app.assetApiUrl ?: app.downloadUrl).apply {
+                    if (app.assetApiUrl != null) header("Accept", "application/octet-stream")
+                }.build()
+                val response = OkHttpClient().newCall(request).execute()
                 response.use { body ->
                     require(body.isSuccessful && body.body != null)
                     body.body!!.byteStream().use { input -> file.outputStream().use { output ->
@@ -355,7 +402,7 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
             val info = context.packageManager.getPackageInfo(packageName, 0)
             ReleaseApp(app.config, app.version, app.tag, app.notes, app.publishedAt, app.assetName, app.assetSize,
                 app.downloadUrl, app.repositoryUrl, app.discoveredAt, info.versionName,
-                if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong())
+                if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong(), assetApiUrl = app.assetApiUrl)
         }.getOrDefault(app)
     }
 }
@@ -462,7 +509,17 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
 
 @Composable private fun SettingsScreen(state: CatalogueState, viewModel: CatalogueViewModel, modifier: Modifier, onOpenSelfUpdates: () -> Unit) {
     var includePrereleases by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().padding(20.dp)) { Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(24.dp)); Text("Repositories", style = MaterialTheme.typography.titleLarge); Text("GitHub repositories are discovered automatically from apps.json", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 6.dp)); Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show prerelease GitHub releases", color = Color(0xFF9BA9B8)) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }; Divider(Modifier.padding(vertical = 20.dp)); Text("Cache", style = MaterialTheme.typography.titleLarge); TextButton(onClick = { viewModel.clearCache() }) { Text("Clear cached release information") }; Divider(Modifier.padding(vertical = 12.dp)); Text("About", style = MaterialTheme.typography.titleLarge); Text("Elmadani Labs\nVersion ${BuildConfig.VERSION_NAME}", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp)); TextButton(onClick = onOpenSelfUpdates) { Text("Updates") } }
+    var token by remember { mutableStateOf("") }
+    Column(modifier.fillMaxSize().padding(20.dp)) {
+        Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(24.dp))
+        Text("GitHub access", style = MaterialTheme.typography.titleLarge)
+        Text("Use a personal access token to access private repositories. It is encrypted on this device and never logged.", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 6.dp))
+        androidx.compose.material3.OutlinedTextField(value = token, onValueChange = { token = it }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, label = { Text("GitHub token") }, visualTransformation = PasswordVisualTransformation())
+        TextButton(onClick = { viewModel.saveGithubToken(token); token = "" }) { Text("Save token and refresh") }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show prerelease GitHub releases", color = Color(0xFF9BA9B8)) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }
+        Divider(Modifier.padding(vertical = 20.dp)); Text("Cache", style = MaterialTheme.typography.titleLarge); TextButton(onClick = { viewModel.clearCache() }) { Text("Clear cached release information") }; Divider(Modifier.padding(vertical = 12.dp)); Text("About", style = MaterialTheme.typography.titleLarge); Text("Elmadani Labs\nVersion ${BuildConfig.VERSION_NAME}", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp)); TextButton(onClick = onOpenSelfUpdates) { Text("Updates") }
+    }
 }
 
 @Composable private fun SelfUpdateScreen(state: SelfUpdateState, viewModel: CatalogueViewModel, modifier: Modifier, onBack: () -> Unit) {

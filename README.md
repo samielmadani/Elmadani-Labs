@@ -10,4 +10,8 @@ Edit only the `githubUsername` value in `app/src/main/assets/apps.json` if the a
 
 The app loads cached release metadata first, then synchronizes repository and release pages in the background using pagination and ETags. Only published releases with APK assets enter the catalogue. APK binaries are downloaded only after the user selects INSTALL or UPDATE.
 
-Release builds use a configured release keystore through `ELMADANI_KEYSTORE_PATH`, `ELMADANI_KEYSTORE_PASSWORD`, `ELMADANI_KEY_ALIAS`, and `ELMADANI_KEY_PASSWORD`. Without those variables, local builds use the Android debug signing key for development.
+Release builds require a configured production keystore through `ELMADANI_KEYSTORE_PATH`, `ELMADANI_KEYSTORE_PASSWORD`, `ELMADANI_KEY_ALIAS`, and `ELMADANI_KEY_PASSWORD`. Debug builds remain available locally without those variables.
+
+The current configuration is `samielmadani` and `samielmadani/Elmadani-Labs`; the account must expose repositories and the self repository must have a published APK release before the catalogue or self-update screen can show data.
+
+Private repositories are supported by saving a GitHub personal access token in Settings. Use a fine-grained token with read-only Metadata and Contents access to the repositories, or a classic token with the `repo` scope. The token is stored with Android Keystore-backed encryption and is never bundled in the APK or printed by the app.
