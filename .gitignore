@@ -8,3 +8,4 @@ local.properties
 .env
 elmadani-labs-release.jks
 elmadani-keystore-base64.txt
+REPO_COMPATIBILITY.md

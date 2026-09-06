@@ -656,8 +656,8 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
                 Text(displayName(app.config.name), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp)); AppStatus(app)
             }
-            Spacer(Modifier.width(8.dp)); TextButton(onClick = { onSelect(app) }) {
-                Icon(if (app.updateAvailable) Icons.Default.Download else if (app.isInstalled) Icons.Default.OpenInNew else Icons.Default.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (app.updateAvailable) "Update" else if (app.isInstalled) "Open" else "Install")
+            Spacer(Modifier.width(8.dp)); TextButton(onClick = { onSelect(app) }, enabled = !app.isInstalled || app.updateAvailable) {
+                Icon(if (app.updateAvailable) Icons.Default.Download else if (app.isInstalled) Icons.Default.CheckCircle else Icons.Default.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (app.updateAvailable) "Update" else if (app.isInstalled) "Up to date" else "Install")
             }
         }
     }
@@ -679,7 +679,7 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
         if (progress != null) {
             val currentProgress = progress!!.coerceIn(0, 100)
             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
-        } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; viewModel.rememberPackage(app, file); (context.findActivity() as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
+        } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; viewModel.rememberPackage(app, file); (context.findActivity() as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else if (app.isInstalled) "Up to date" else "Install") }
         if (app.isInstalled && !app.updateAvailable) TextButton(onClick = { context.startActivity(context.packageManager.getLaunchIntentForPackage(app.config.packageName.orEmpty())) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open") }
         Spacer(Modifier.height(20.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
     }
