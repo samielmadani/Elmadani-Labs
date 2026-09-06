@@ -381,7 +381,10 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
     private val _selfUpdate = MutableStateFlow(SelfUpdateState())
     val selfUpdate: StateFlow<SelfUpdateState> = _selfUpdate.asStateFlow()
 
-    init { refresh(false) }
+    init {
+        refresh(false)
+        checkSelfUpdate(false)
+    }
 
     fun refresh(includePrereleases: Boolean) {
         _state.value = _state.value.copy(refreshing = true)
@@ -495,7 +498,11 @@ class MainActivity : ComponentActivity() {
 
     private fun openInstaller(file: File) {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
-        startActivityForResult(Intent(Intent.ACTION_INSTALL_PACKAGE).apply { data = uri; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, 42)
+        startActivityForResult(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = android.content.ClipData.newRawUri("APK", uri)
+        }, 42)
     }
 
     @Deprecated("Android returns to the app after the user closes the package installer")
