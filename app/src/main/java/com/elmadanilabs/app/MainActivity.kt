@@ -495,7 +495,7 @@ class MainActivity : ComponentActivity() {
 
     private fun openInstaller(file: File) {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
-        startActivityForResult(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, 42)
+        startActivityForResult(Intent(Intent.ACTION_INSTALL_PACKAGE).apply { data = uri; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, 42)
     }
 
     @Deprecated("Android returns to the app after the user closes the package installer")
@@ -580,7 +580,7 @@ private fun DockItem(selected: Boolean, icon: androidx.compose.ui.graphics.vecto
 private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: String, onQuery: (String) -> Unit, onRefresh: () -> Unit, onSelect: (ReleaseApp) -> Unit, modifier: Modifier) {
     Column(modifier.fillMaxSize().padding(top = 26.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("ELMADANI LABS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); Text("Apps", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+            Column(Modifier.weight(1f)) { Text("Elmadani Labs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Refresh") }
         }
         Spacer(Modifier.height(18.dp)); SearchField(query, onQuery); Spacer(Modifier.height(10.dp))
