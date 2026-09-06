@@ -106,6 +106,23 @@ jobs:
           version_code=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionCode='\\([^']*\\)'.*/\\1/p")
           test -n "$package_name" && test -n "$version_name" && test -n "$version_code"
           printf '{"packageName":"%s","versionName":"%s","versionCode":%s}\n' "$package_name" "$version_name" "$version_code" > app/build/outputs/apk/release/elmadani-app.json
+            python3 - app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/elmadani-app-icon.png <<'PY'
+            import pathlib
+            import sys
+            import zipfile
+
+            apk_path, icon_path = sys.argv[1:]
+            with zipfile.ZipFile(apk_path) as apk:
+              candidates = [
+                (info.file_size, info.filename)
+                for info in apk.infolist()
+                if info.filename.lower().endswith('.png') and info.filename.startswith(('res/mipmap', 'res/drawable'))
+              ]
+              if not candidates:
+                raise SystemExit('No PNG application icon found in APK')
+              _, selected = max(candidates)
+              pathlib.Path(icon_path).write_bytes(apk.read(selected))
+            PY
 
       - name: Publish GitHub Release
         env:
@@ -121,6 +138,7 @@ jobs:
           release_notes=$(printf '## Elmadani Labs %s\n\n- Version: `%s`\n- Version code: `%s`\n- Commit: `%s`\n- Build date: `%s`\n- APK: `%s`\n\n### Changes\n' "$RELEASE_TAG" "$VERSION_NAME" "$VERSION_CODE" "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ASSET_NAME")
           gh release create "$RELEASE_TAG" "$apk_path#$ASSET_NAME" \
             "app/build/outputs/apk/release/elmadani-app.json#elmadani-app.json" \
+            "app/build/outputs/apk/release/elmadani-app-icon.png#elmadani-app-icon.png" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Elmadani Labs $RELEASE_TAG" \
             --generate-notes \

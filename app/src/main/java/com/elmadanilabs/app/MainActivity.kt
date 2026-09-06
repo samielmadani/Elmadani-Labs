@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
@@ -26,10 +27,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -77,6 +81,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -275,7 +281,7 @@ class CatalogueRepository(private val context: Context) {
             description = repository.optString("description").ifBlank { "Android application from $owner" },
             category = repository.optJSONArray("topics")?.optString(0)?.replaceFirstChar { it.uppercase() } ?: "Other",
             packageName = null,
-            iconUrl = repository.optJSONObject("owner")?.optString("avatar_url").orEmpty().ifBlank { null },
+            iconUrl = null,
             topics = repository.optJSONArray("topics")?.let { topics -> (0 until topics.length()).map { topics.optString(it) } } ?: emptyList()
         )
         var page = 1
@@ -300,10 +306,13 @@ class CatalogueRepository(private val context: Context) {
         val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
             .firstOrNull { it.optString("name").lowercase(Locale.US).endsWith(".apk") } ?: return null
         val metadataIcon = (0 until assets.length()).map { assets.getJSONObject(it) }
-            .firstOrNull { asset ->
+            .firstOrNull { it.optString("name").equals("elmadani-app-icon.png", ignoreCase = true) }
+            ?.optString("browser_download_url").orEmpty().ifBlank {
+                (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { asset ->
                 val name = asset.optString("name").lowercase(Locale.US)
                 name.endsWith(".png") || name.endsWith(".webp") || name.endsWith(".jpg") || name.endsWith(".jpeg")
-            }?.optString("browser_download_url").orEmpty().ifBlank { config.iconUrl.orEmpty() }
+                }?.optString("browser_download_url").orEmpty().ifBlank { config.iconUrl.orEmpty() }
+            }
         val metadata = (0 until assets.length()).map { assets.getJSONObject(it) }
             .firstOrNull { it.optString("name").equals("elmadani-app.json", ignoreCase = true) }
             ?.let { asset -> getJsonObject(asset.optString("url"), "metadata-${config.owner}-${config.repo}-${release.optString("tag_name")}") }
@@ -440,8 +449,9 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
                         while (input.read(buffer).also { read = it } != -1) { output.write(buffer, 0, read); count += read; if (total > 0) onProgress((count * 100 / total).toInt()) }
                     }}
                 }
+                require(file.exists() && file.length() > 0) { "The downloaded APK is empty." }
                 withContext(Dispatchers.Main) { onReady(file) }
-            }
+            }.onFailure { error -> withContext(Dispatchers.Main) { onProgress(-1) } }
         }
     }
 
@@ -475,19 +485,28 @@ class MainActivity : ComponentActivity() {
     }
 
     fun launchInstaller(file: File) {
+        pendingInstall = file
         if (android.os.Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
-            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            startActivityForResult(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")), 43)
             return
         }
+        openInstaller(file)
+    }
+
+    private fun openInstaller(file: File) {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
-        pendingInstall = file
         startActivityForResult(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, 42)
     }
 
     @Deprecated("Android returns to the app after the user closes the package installer")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 42) {
+        if (requestCode == 43) {
+            pendingInstall?.let { file ->
+                if (android.os.Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) openInstaller(file)
+                else { file.delete(); pendingInstall = null; viewModel.refreshInstalled() }
+            }
+        } else if (requestCode == 42) {
             pendingInstall?.delete()
             pendingInstall = null
             viewModel.refreshInstalled()
@@ -513,14 +532,20 @@ fun ElmadaniLabsApp(viewModel: CatalogueViewModel) {
     }
     MaterialTheme(colorScheme = colors) {
         val refreshState = rememberPullToRefreshState()
+        val pagerState = rememberPagerState(initialPage = tab, pageCount = { 2 })
+        LaunchedEffect(tab) { if (pagerState.currentPage != tab) pagerState.animateScrollToPage(tab) }
+        LaunchedEffect(pagerState.currentPage) { tab = pagerState.currentPage }
         Scaffold(containerColor = MaterialTheme.colorScheme.background, contentWindowInsets = WindowInsets(0), bottomBar = {
             FloatingDock(tab) { destination -> selected = null; showSelfUpdates = false; tab = destination }
         }) { padding ->
-            PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = { viewModel.refresh(false) }, state = refreshState, modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-                when {
-                    showSelfUpdates -> SelfUpdateScreen(selfUpdate, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = false }
-                    tab == 1 -> SettingsScreen(state, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = true }
-                    else -> HomeScreen(filtered, state, query, { query = it }, { viewModel.refresh(false) }, { selected = it }, Modifier.fillMaxSize().padding(horizontal = 20.dp))
+            PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = { viewModel.refresh(false) }, state = refreshState, modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = padding.calculateBottomPadding())) {
+                if (showSelfUpdates) {
+                    SelfUpdateScreen(selfUpdate, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = false }
+                } else {
+                    HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                        if (page == 1) SettingsScreen(state, viewModel, Modifier.fillMaxSize().padding(horizontal = 20.dp)) { showSelfUpdates = true }
+                        else HomeScreen(filtered, state, query, { query = it }, { viewModel.refresh(false) }, { selected = it }, Modifier.fillMaxSize().padding(horizontal = 20.dp))
+                    }
                 }
             }
         }
@@ -605,8 +630,7 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
     Surface(Modifier.fillMaxWidth().clickable { onSelect(app) }, color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp), tonalElevation = 1.dp) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             AppIcon(app, 68); Spacer(Modifier.width(16.dp)); Column(Modifier.weight(1f)) {
-                Text(app.config.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                Text(app.config.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(displayName(app.config.name), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp)); AppStatus(app)
             }
             Spacer(Modifier.width(8.dp)); TextButton(onClick = { onSelect(app) }) {
@@ -628,14 +652,14 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
 @Composable private fun DetailScreen(app: ReleaseApp, viewModel: CatalogueViewModel, modifier: Modifier, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var progress by remember { mutableStateOf<Int?>(null) }
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }; AppIcon(app, 96); Spacer(Modifier.height(12.dp)); Text(app.config.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Text(app.config.description, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(18.dp)); AppStatus(app); Text("${app.version}  •  ${formatSize(app.assetSize)}  •  ${app.publishedAt.take(10)}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp));
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }; AppIcon(app, 96); Spacer(Modifier.height(12.dp)); Text(displayName(app.config.name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(18.dp)); AppStatus(app); Text("${app.version}  •  ${formatSize(app.assetSize)}  •  ${app.publishedAt.take(10)}", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp));
         AnimatedContent(progress, label = "download state") { currentProgress ->
             if (currentProgress != null) {
                 Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
-            } else Button(onClick = { progress = 0; viewModel.install(app, { progress = it }) { file -> viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
+            } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
         }
         if (app.isInstalled && !app.updateAvailable) TextButton(onClick = { context.startActivity(context.packageManager.getLaunchIntentForPackage(app.config.packageName.orEmpty())) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open") }
-        Spacer(Modifier.height(20.dp)); Text("Release notes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(app.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp)); Spacer(Modifier.height(16.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
+        Spacer(Modifier.height(20.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
     }
 }
 
@@ -683,14 +707,25 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
             Text(latest.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.updateAvailable) {
                 var progress by remember { mutableStateOf<Int?>(null) }
-                AnimatedContent(progress, label = "self update state", modifier = Modifier.padding(top = 20.dp)) { currentProgress -> if (currentProgress == null) Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ progress = it }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") } else Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) } }
+                AnimatedContent(progress, label = "self update state", modifier = Modifier.padding(top = 20.dp)) { currentProgress -> if (currentProgress == null) Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ value -> progress = value.takeIf { it >= 0 } }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") } else Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) } }
             }
         }
     }
 }
-@Composable private fun AppIcon(app: ReleaseApp?, size: Int) { if (app?.config?.iconUrl != null) AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, modifier = Modifier.size(size.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))) else Box(Modifier.size(size.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Text(app?.config?.name?.take(1)?.uppercase() ?: "E", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
+@Composable private fun AppIcon(app: ReleaseApp?, size: Int) {
+    if (app == null) {
+        androidx.compose.foundation.Image(painterResource(com.elmadanilabs.app.R.drawable.icon), "Elmadani Labs", Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Fit)
+    } else if (app.config.iconUrl != null) {
+        AsyncImage(model = app.config.iconUrl, contentDescription = app.config.name, contentScale = ContentScale.Fit, modifier = Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
+    } else {
+        Box(Modifier.size(size.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) { Text(app.config.name.take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+    }
+}
 @Composable private fun LinearStatus(text: String) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 10.dp)) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text(text, color = Color(0xFF9BA9B8)) } }
 @Composable private fun EmptyState(title: String, subtitle: String, onRefresh: () -> Unit) { Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)); Spacer(Modifier.height(10.dp)); Text(title, fontWeight = FontWeight.SemiBold); Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall); TextButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Refresh") } } } }
 private fun formatSize(bytes: Long) = if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "%.1f MB".format(Locale.US, bytes / 1024f / 1024f)
+private fun displayName(name: String) = name.split(Regex("[\\s_-]+"))
+    .filter { it.isNotBlank() }
+    .joinToString(" ") { word -> word.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) } }
 private fun extractVersionCode(notes: String): Int? = Regex("(?i)versionCode\\s*:\\s*(\\d+)").find(notes)?.groupValues?.getOrNull(1)?.toIntOrNull()
 private fun compareVersions(left: String, right: String): Int { val a = left.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; val b = right.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; for (i in 0 until maxOf(a.size, b.size)) { val result = (a.getOrElse(i) { 0 }).compareTo(b.getOrElse(i) { 0 }); if (result != 0) return result }; return 0 }
