@@ -1,0 +1,102 @@
+name: Release Elmadani Labs
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Read project version
+        id: version
+        shell: bash
+        run: |
+          version_name=$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n 1)
+          version_code=$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -n 1)
+          test -n "$version_name"
+          test -n "$version_code"
+          echo "name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version_name" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ELMADANI_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ELMADANI_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ELMADANI_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ELMADANI_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "Missing ELMADANI_KEYSTORE_BASE64"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Missing ELMADANI_KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing ELMADANI_KEY_ALIAS"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing ELMADANI_KEY_PASSWORD"; exit 1; }
+          keystore_path="$RUNNER_TEMP/elmadani-release.jks"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "ELMADANI_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          ELMADANI_KEYSTORE_PASSWORD: ${{ secrets.ELMADANI_KEYSTORE_PASSWORD }}
+          ELMADANI_KEY_ALIAS: ${{ secrets.ELMADANI_KEY_ALIAS }}
+          ELMADANI_KEY_PASSWORD: ${{ secrets.ELMADANI_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Publish GitHub release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APK_PATH: app/build/outputs/apk/release/app-release.apk
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const apkPath = process.env.APK_PATH;
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag
+              });
+              core.info(`Release ${tag} already exists; nothing to publish.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Elmadani Labs ${tag}`,
+              body: `Android versionName: ${tag.slice(1)}\nAndroid versionCode: ${{ steps.version.outputs.code }}\nApplication ID: com.elmadanilabs.app`,
+              generate_release_notes: true,
+              draft: false,
+              prerelease: false
+            });
+            const fs = require('fs');
+            const stats = fs.statSync(apkPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              name: 'elmadani-labs.apk',
+              data: fs.createReadStream(apkPath),
+              headers: {
+                'content-type': 'application/vnd.android.package-archive',
+                'content-length': stats.size
+              }
+            });

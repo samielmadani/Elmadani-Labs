@@ -115,6 +115,20 @@ data class CatalogueState(
     val lastRefresh: String? = null
 )
 
+data class SelfUpdateState(
+    val currentVersion: String = BuildConfig.VERSION_NAME,
+    val currentVersionCode: Int = BuildConfig.VERSION_CODE,
+    val latest: ReleaseApp? = null,
+    val latestVersionCode: Int? = null,
+    val checking: Boolean = false,
+    val message: String? = null,
+    val downloadProgress: Int? = null
+) {
+    val updateAvailable: Boolean
+        get() = latest != null && (latestVersionCode?.let { it > currentVersionCode }
+            ?: (compareVersions(latest.version, currentVersion) > 0))
+}
+
 class CatalogueRepository(private val context: Context) {
     private val client = OkHttpClient()
     private val preferences = context.getSharedPreferences("catalogue", Context.MODE_PRIVATE)
@@ -123,6 +137,7 @@ class CatalogueRepository(private val context: Context) {
             context.assets.open("apps.json").bufferedReader().use { JSONObject(it.readText()).optString("githubUsername") }
         }.getOrDefault("samielmadani").ifBlank { "samielmadani" }
     }
+    private val selfRepository = "Elmadani-Labs"
 
     fun cached(): List<ReleaseApp> = runCatching {
         val array = JSONArray(preferences.getString("apps", "[]"))
@@ -139,6 +154,31 @@ class CatalogueRepository(private val context: Context) {
 
     fun lastRefresh(): String? = preferences.getString("refreshed", null)
     fun clearCache() = preferences.edit().clear().apply()
+
+    fun checkSelfUpdate(includePrereleases: Boolean): Pair<ReleaseApp?, String?> {
+        var page = 1
+        while (true) {
+            val releases = getJsonArray("https://api.github.com/repos/$githubUsername/$selfRepository/releases?per_page=100&page=$page", "self-releases-$page")
+                ?: return null to "Unable to check for updates."
+            val release = (0 until releases.length()).asSequence()
+                .map { releases.getJSONObject(it) }
+                .firstOrNull { !it.optBoolean("draft") && (includePrereleases || !it.optBoolean("prerelease")) && hasApk(it) }
+            if (release != null) {
+                val config = AppConfig(
+                    owner = githubUsername,
+                    repo = selfRepository,
+                    name = "Elmadani Labs",
+                    description = "Personal software distribution platform",
+                    category = "System",
+                    packageName = BuildConfig.APPLICATION_ID,
+                    iconUrl = null
+                )
+                return releaseToApp(config, release) to null
+            }
+            if (releases.length() < 100) return null to "You're up to date"
+            page++
+        }
+    }
 
     fun refresh(includePrereleases: Boolean): Pair<List<ReleaseApp>, String?> {
         val repositories = discoverRepositories()
@@ -166,6 +206,7 @@ class CatalogueRepository(private val context: Context) {
     private fun fetchLatestApk(repository: JSONObject, includePrereleases: Boolean): ReleaseApp? {
         val owner = repository.optJSONObject("owner")?.optString("login").orEmpty().ifBlank { githubUsername }
         val repo = repository.optString("name")
+        if (owner.equals(githubUsername, ignoreCase = true) && repo.equals(selfRepository, ignoreCase = true)) return null
         val config = AppConfig(
             owner = owner,
             repo = repo,
@@ -240,6 +281,8 @@ class CatalogueRepository(private val context: Context) {
 class CatalogueViewModel(private val repository: CatalogueRepository, private val context: Context) : ViewModel() {
     private val _state = MutableStateFlow(CatalogueState(apps = withInstalled(repository.cached()), loading = false))
     val state: StateFlow<CatalogueState> = _state.asStateFlow()
+    private val _selfUpdate = MutableStateFlow(SelfUpdateState())
+    val selfUpdate: StateFlow<SelfUpdateState> = _selfUpdate.asStateFlow()
 
     init { refresh(false) }
 
@@ -255,6 +298,28 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
 
     fun clearCache() { repository.clearCache(); _state.value = CatalogueState(loading = false) }
     fun refreshInstalled() { _state.value = _state.value.copy(apps = withInstalled(_state.value.apps)) }
+
+    fun checkSelfUpdate(includePrereleases: Boolean = false) {
+        _selfUpdate.value = _selfUpdate.value.copy(checking = true, message = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            val (latest, error) = repository.checkSelfUpdate(includePrereleases)
+            val message = when {
+                error != null && latest == null -> error
+                latest != null && (extractVersionCode(latest.notes)?.let { it > BuildConfig.VERSION_CODE }
+                    ?: (compareVersions(latest.version, BuildConfig.VERSION_NAME) > 0)) -> "Update available"
+                else -> "You're up to date"
+            }
+            _selfUpdate.value = _selfUpdate.value.copy(latest = latest, latestVersionCode = latest?.let { extractVersionCode(it.notes) }, checking = false, message = message)
+        }
+    }
+
+    fun downloadSelfUpdate(onProgress: (Int) -> Unit, onReady: (File) -> Unit) {
+        val latest = _selfUpdate.value.latest ?: return
+        install(latest, { progress ->
+            _selfUpdate.value = _selfUpdate.value.copy(downloadProgress = progress)
+            onProgress(progress)
+        }, onReady)
+    }
 
     fun rememberPackage(app: ReleaseApp, file: File) {
         val packageInfo = context.packageManager.getPackageArchiveInfo(file.path, 0) ?: return
@@ -330,7 +395,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ElmadaniLabsApp(viewModel: CatalogueViewModel) {
     val state by viewModel.state.collectAsState()
+    val selfUpdate by viewModel.selfUpdate.collectAsState()
     var selected by remember { mutableStateOf<ReleaseApp?>(null) }
+    var showSelfUpdates by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(0) }
     var query by remember { mutableStateOf("") }
     val filtered = state.apps.filter { it.config.name.contains(query, true) || it.config.description.contains(query, true) }
@@ -344,7 +411,8 @@ fun ElmadaniLabsApp(viewModel: CatalogueViewModel) {
         }) { padding ->
             when {
                 selected != null -> DetailScreen(selected!!, viewModel, Modifier.padding(padding)) { selected = null }
-                tab == 2 -> SettingsScreen(state, viewModel, Modifier.padding(padding))
+                showSelfUpdates -> SelfUpdateScreen(selfUpdate, viewModel, Modifier.padding(padding)) { showSelfUpdates = false }
+                tab == 2 -> SettingsScreen(state, viewModel, Modifier.padding(padding)) { showSelfUpdates = true }
                 else -> HomeScreen(if (tab == 1) filtered.filter { it.updateAvailable } else filtered, state, query, { query = it }, { viewModel.refresh(false) }, { selected = it }, Modifier.padding(padding), tab == 1)
             }
         }
@@ -392,12 +460,36 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
     }
 }
 
-@Composable private fun SettingsScreen(state: CatalogueState, viewModel: CatalogueViewModel, modifier: Modifier) {
+@Composable private fun SettingsScreen(state: CatalogueState, viewModel: CatalogueViewModel, modifier: Modifier, onOpenSelfUpdates: () -> Unit) {
     var includePrereleases by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().padding(20.dp)) { Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(24.dp)); Text("Repositories", style = MaterialTheme.typography.titleLarge); Text("Repositories are configured in app/src/main/assets/apps.json", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 6.dp)); Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show prerelease GitHub releases", color = Color(0xFF9BA9B8)) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }; Divider(Modifier.padding(vertical = 20.dp)); Text("Cache", style = MaterialTheme.typography.titleLarge); TextButton(onClick = { viewModel.clearCache() }) { Text("Clear cached release information") }; Divider(Modifier.padding(vertical = 12.dp)); Text("About Elmadani Labs", style = MaterialTheme.typography.titleLarge); Text("Personal software distribution platform\nVersion 1.0.0", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp)) }
+    Column(modifier.fillMaxSize().padding(20.dp)) { Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Spacer(Modifier.height(24.dp)); Text("Repositories", style = MaterialTheme.typography.titleLarge); Text("GitHub repositories are discovered automatically from apps.json", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 6.dp)); Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Include prereleases"); Text("Show prerelease GitHub releases", color = Color(0xFF9BA9B8)) }; androidx.compose.material3.Switch(checked = includePrereleases, onCheckedChange = { includePrereleases = it; viewModel.refresh(it) }) }; Divider(Modifier.padding(vertical = 20.dp)); Text("Cache", style = MaterialTheme.typography.titleLarge); TextButton(onClick = { viewModel.clearCache() }) { Text("Clear cached release information") }; Divider(Modifier.padding(vertical = 12.dp)); Text("About", style = MaterialTheme.typography.titleLarge); Text("Elmadani Labs\nVersion ${BuildConfig.VERSION_NAME}", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp)); TextButton(onClick = onOpenSelfUpdates) { Text("Updates") } }
+}
+
+@Composable private fun SelfUpdateScreen(state: SelfUpdateState, viewModel: CatalogueViewModel, modifier: Modifier, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(modifier.fillMaxSize().padding(20.dp)) {
+        IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+        Text("Elmadani Labs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Current version\nv${state.currentVersion}", color = Color(0xFFB6C3D1), modifier = Modifier.padding(top = 16.dp))
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = { viewModel.checkSelfUpdate() }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
+        if (state.checking) LinearStatus("Checking GitHub Releases...")
+        state.message?.let { message -> Text(message, color = if (message == "Update available") MaterialTheme.colorScheme.primary else Color(0xFFB6C3D1), modifier = Modifier.padding(vertical = 16.dp)) }
+        state.latest?.let { latest ->
+            Text("New version\nv${latest.version.trimStart('v')}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Release date: ${latest.publishedAt.take(10)}", color = Color(0xFF9BA9B8), modifier = Modifier.padding(top = 8.dp))
+            Text(latest.notes.ifBlank { "No release notes provided." }, modifier = Modifier.padding(top = 16.dp))
+            if (state.updateAvailable) {
+                var progress by remember { mutableStateOf<Int?>(null) }
+                Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ progress = it }) { file -> (context as? MainActivity)?.launchInstaller(file) } }, enabled = progress == null, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) { Text("Update") }
+                progress?.let { Text("Downloading update: $it%", modifier = Modifier.padding(top = 10.dp)) }
+            }
+        }
+    }
 }
 @Composable private fun AppIcon(app: ReleaseApp, size: Int) { if (app.config.iconUrl != null) AsyncImage(model = app.config.iconUrl, contentDescription = null, modifier = Modifier.size(size.dp)) else Box(Modifier.size(size.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) { Text(app.config.name.take(1), color = Color(0xFF0B1017), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
 @Composable private fun LinearStatus(text: String) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 10.dp)) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text(text, color = Color(0xFF9BA9B8)) } }
 @Composable private fun EmptyState(text: String) { Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) { Text(text, color = Color(0xFF9BA9B8)) } }
 private fun formatSize(bytes: Long) = if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "%.1f MB".format(Locale.US, bytes / 1024f / 1024f)
+private fun extractVersionCode(notes: String): Int? = Regex("(?i)versionCode\\s*:\\s*(\\d+)").find(notes)?.groupValues?.getOrNull(1)?.toIntOrNull()
 private fun compareVersions(left: String, right: String): Int { val a = left.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; val b = right.trimStart('v').split('.').map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }; for (i in 0 until maxOf(a.size, b.size)) { val result = (a.getOrElse(i) { 0 }).compareTo(b.getOrElse(i) { 0 }); if (result != 0) return result }; return 0 }
