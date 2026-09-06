@@ -1,11 +1,14 @@
 package com.elmadanilabs.app
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
@@ -109,6 +112,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 data class AppConfig(
     val owner: String,
@@ -454,7 +463,10 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
                 }
                 require(file.exists() && file.length() > 0) { "The downloaded APK is empty." }
                 withContext(Dispatchers.Main) { onReady(file) }
-            }.onFailure { error -> withContext(Dispatchers.Main) { onProgress(-1) } }
+            }.onFailure { error ->
+                Log.e("CatalogueViewModel", "APK download or installer preparation failed", error)
+                withContext(Dispatchers.Main) { onProgress(-1) }
+            }
         }
     }
 
@@ -498,12 +510,13 @@ class MainActivity : ComponentActivity() {
 
     private fun openInstaller(file: File) {
         val uri = FileProvider.getUriForFile(this, "com.elmadanilabs.app.fileprovider", file)
-        startActivityForResult(Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+        val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newRawUri("APK", uri)
-        }, 42)
+        }
+        startActivityForResult(intent, 42)
     }
 
     @Deprecated("Android returns to the app after the user closes the package installer")
@@ -664,7 +677,7 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
         if (progress != null) {
             val currentProgress = progress!!.coerceIn(0, 100)
             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(progress = { currentProgress / 100f }, Modifier.size(22.dp), strokeWidth = 3.dp); Spacer(Modifier.width(12.dp)); Text("Downloading $currentProgress%", fontWeight = FontWeight.Medium) } }
-        } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; viewModel.rememberPackage(app, file); (context as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
+        } else Button(onClick = { progress = 0; viewModel.install(app, { value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; viewModel.rememberPackage(app, file); (context.findActivity() as? MainActivity)?.launchInstaller(file) } }, enabled = !app.isInstalled || app.updateAvailable, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text(if (app.updateAvailable) "Update" else "Install") }
         if (app.isInstalled && !app.updateAvailable) TextButton(onClick = { context.startActivity(context.packageManager.getLaunchIntentForPackage(app.config.packageName.orEmpty())) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open") }
         Spacer(Modifier.height(20.dp)); TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("GitHub repository") }
     }
@@ -717,7 +730,7 @@ private fun HomeScreen(apps: List<ReleaseApp>, state: CatalogueState, query: Str
                 if (progress != null) {
                     val currentProgress = progress!!.coerceIn(0, 100)
                     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.padding(top = 20.dp).fillMaxWidth()) { Text("Downloading update: $currentProgress%", Modifier.padding(16.dp), fontWeight = FontWeight.Medium) }
-                } else Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; (context as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.padding(top = 20.dp).fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") }
+                    } else Button(onClick = { progress = 0; viewModel.downloadSelfUpdate({ value -> progress = value.takeIf { it >= 0 } }) { file -> progress = null; (context.findActivity() as? MainActivity)?.launchInstaller(file) } }, modifier = Modifier.padding(top = 20.dp).fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Update") }
             }
         }
     }
