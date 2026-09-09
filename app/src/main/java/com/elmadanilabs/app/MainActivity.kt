@@ -201,6 +201,9 @@ class CatalogueRepository(private val context: Context) {
         }
     }
 
+    private fun publicRequest(url: String): Request.Builder = Request.Builder().url(url)
+        .header("User-Agent", "Elmadani-Labs")
+
     fun cached(): List<ReleaseApp> = runCatching {
         val array = JSONArray(preferences.getString("apps", "[]"))
         (0 until array.length()).mapNotNull { index ->
@@ -279,11 +282,10 @@ class CatalogueRepository(private val context: Context) {
             }
         }
 
-        if (hasGithubToken() && !appendPages(
-                { page -> "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$page" },
-                "repos-pat"
-            )
-        ) return null
+        if (hasGithubToken()) appendPages(
+            { page -> "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$page" },
+            "repos-pat"
+        )
         if (!appendPages(
                 { page -> "https://api.github.com/users/$githubUsername/repos?type=owner&per_page=100&page=$page" },
                 "repos-public"
@@ -349,10 +351,19 @@ class CatalogueRepository(private val context: Context) {
     private fun getJsonArray(url: String, cacheKey: String): JSONArray? {
         val etagKey = "etag-$cacheKey"
         val bodyKey = "body-$cacheKey"
-        val requestBuilder = authenticatedRequest(url).header("Accept", "application/vnd.github+json")
-        preferences.getString(etagKey, null)?.let { requestBuilder.header("If-None-Match", it) }
+        fun requestBuilder(includeToken: Boolean): Request.Builder {
+            val builder = if (includeToken) authenticatedRequest(url) else publicRequest(url)
+            return builder.header("Accept", "application/vnd.github+json").apply {
+                preferences.getString(etagKey, null)?.let { header("If-None-Match", it) }
+            }
+        }
         return runCatching {
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            var response = client.newCall(requestBuilder(true).build()).execute()
+            if (response.code == 401 || response.code == 403) {
+                response.close()
+                response = client.newCall(requestBuilder(false).build()).execute()
+            }
+            response.use {
                 lastApiStatus = response.code
                 if (response.code == 304) return JSONArray(preferences.getString(bodyKey, "[]"))
                 if (!response.isSuccessful) return null
