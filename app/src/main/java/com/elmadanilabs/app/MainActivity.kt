@@ -521,11 +521,15 @@ class MainActivity : ComponentActivity() {
             setDataAndType(uri, "application/vnd.android.package-archive")
             putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, packageName)
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-            putExtra(Intent.EXTRA_RETURN_RESULT, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newRawUri("APK", uri)
         }
         startActivityForResult(intent, 42)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::viewModel.isInitialized) viewModel.refreshInstalled()
     }
 
     @Deprecated("Android returns to the app after the user closes the package installer")
