@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -261,22 +260,36 @@ class CatalogueRepository(private val context: Context) {
 
     private fun discoverRepositories(): List<JSONObject>? {
         val repositories = mutableListOf<JSONObject>()
-        var page = 1
-        while (true) {
-            val endpoint = if (hasGithubToken()) {
-                "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$page"
-            } else {
-                "https://api.github.com/users/$githubUsername/repos?per_page=100&page=$page"
+        val seen = mutableSetOf<String>()
+
+        fun appendPages(endpoint: (Int) -> String, cachePrefix: String): Boolean {
+            var page = 1
+            while (true) {
+                val pageData = getJsonArray(endpoint(page), "$cachePrefix-$page") ?: return false
+                for (index in 0 until pageData.length()) {
+                    val repository = pageData.getJSONObject(index)
+                    val owner = repository.optJSONObject("owner")?.optString("login").orEmpty()
+                    if (owner.equals(githubUsername, ignoreCase = true)) {
+                        val key = "${owner.lowercase(Locale.US)}/${repository.optString("name").lowercase(Locale.US)}"
+                        if (seen.add(key)) repositories += repository
+                    }
+                }
+                if (pageData.length() < 100) return true
+                page++
             }
-            val pageData = getJsonArray(endpoint, "repos-$page") ?: return null
-            for (index in 0 until pageData.length()) {
-                val repository = pageData.getJSONObject(index)
-                val owner = repository.optJSONObject("owner")?.optString("login").orEmpty()
-                if (owner.equals(githubUsername, ignoreCase = true)) repositories += repository
-            }
-            if (pageData.length() < 100) return repositories
-            page++
         }
+
+        if (hasGithubToken() && !appendPages(
+                { page -> "https://api.github.com/user/repos?visibility=all&affiliation=owner&per_page=100&page=$page" },
+                "repos-pat"
+            )
+        ) return null
+        if (!appendPages(
+                { page -> "https://api.github.com/users/$githubUsername/repos?type=owner&per_page=100&page=$page" },
+                "repos-public"
+            )
+        ) return null
+        return repositories
     }
 
     private fun fetchLatestApk(repository: JSONObject, includePrereleases: Boolean): ReleaseApp? {
@@ -471,7 +484,7 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
     }
 
     private fun withInstalled(apps: List<ReleaseApp>) = apps.map { app ->
-        val packageName = app.config.packageName ?: findInstalledPackage(app) ?: return@map app
+        val packageName = app.config.packageName ?: return@map app
         runCatching {
             val info = context.packageManager.getPackageInfo(packageName, 0)
             ReleaseApp(app.config.copy(packageName = packageName), app.version, app.tag, app.notes, app.publishedAt, app.assetName, app.assetSize,
@@ -479,12 +492,6 @@ class CatalogueViewModel(private val repository: CatalogueRepository, private va
                 if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong(), assetApiUrl = app.assetApiUrl)
         }.getOrDefault(app)
     }
-
-    private fun findInstalledPackage(app: ReleaseApp): String? = context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-        .firstOrNull { info ->
-            val label = context.packageManager.getApplicationLabel(info).toString()
-            label.equals(app.config.name, ignoreCase = true) || info.packageName.substringAfterLast('.').equals(app.config.repo, ignoreCase = true)
-        }?.packageName
 }
 
 class MainActivity : ComponentActivity() {
