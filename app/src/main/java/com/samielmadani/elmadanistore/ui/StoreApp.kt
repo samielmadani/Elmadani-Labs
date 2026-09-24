@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -114,7 +115,7 @@ import com.samielmadani.elmadanistore.data.ThemeMode
 import com.samielmadani.elmadanistore.ui.theme.ThemeSettings
 import kotlinx.coroutines.launch
 
-private enum class TopLevelPage { Apps, Settings }
+private enum class TopLevelPage { Apps, Websites, Settings }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -228,6 +229,14 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
                 label = { Text("Apps") }
             )
             NavigationBarItem(
+                selected = selectedPage == TopLevelPage.Websites.ordinal,
+                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } },
+                icon = {
+                    Icon(Icons.Default.Language, null)
+                },
+                label = { Text("Websites") }
+            )
+            NavigationBarItem(
                 selected = selectedPage == TopLevelPage.Settings.ordinal,
                 onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } },
                 icon = {
@@ -243,6 +252,7 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                 when (TopLevelPage.entries[page]) {
                     TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
+                    TopLevelPage.Websites -> WebsitesPage()
                     TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
                 }
             }
@@ -284,6 +294,16 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
 
     selectedApp?.let { app ->
         DetailPage(app, progress[app.repo], failedDownloads.contains(app.repo), storeViewModel, { selectedApp = null }, { handleInstall(app) }, { handleInstall(app) })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WebsitesPage() {
+    Scaffold(topBar = { TopAppBar(title = { Text("Websites") }) }) { padding ->
+        Box(Modifier.padding(padding).fillMaxSize()) {
+            EmptyState("No websites added yet", "Add websites you want to keep close at hand.", Icons.Default.Language, null)
+        }
     }
 }
 
