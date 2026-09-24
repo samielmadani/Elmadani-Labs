@@ -65,8 +65,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -78,8 +76,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -216,47 +212,26 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
         return
     }
 
-    Scaffold(bottomBar = {
-        NavigationBar {
-            NavigationBarItem(
-                selected = selectedPage == TopLevelPage.Apps.ordinal,
-                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } },
-                icon = {
-                    BadgedBox(badge = { if (pendingUpdates.size > 0) Badge { Text(pendingUpdates.size.toString()) } }) {
-                        Icon(Icons.Default.CloudDownload, null)
-                    }
-                },
-                label = { Text("Apps") }
-            )
-            NavigationBarItem(
-                selected = selectedPage == TopLevelPage.Websites.ordinal,
-                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } },
-                icon = {
-                    Icon(Icons.Default.Language, null)
-                },
-                label = { Text("Websites") }
-            )
-            NavigationBarItem(
-                selected = selectedPage == TopLevelPage.Settings.ordinal,
-                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } },
-                icon = {
-                    BadgedBox(badge = { if (pendingUpdates.size > 0) Badge { Text(pendingUpdates.size.toString()) } }) {
-                        Icon(Icons.Default.Settings, null)
-                    }
-                },
-                label = { Text("Settings") }
-            )
-        }
-    }) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                when (TopLevelPage.entries[page]) {
-                    TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
-                    TopLevelPage.Websites -> WebsitesPage()
-                    TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
-                }
+    Box(Modifier.fillMaxSize()) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            when (TopLevelPage.entries[page]) {
+                TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
+                TopLevelPage.Websites -> WebsitesPage()
+                TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
             }
-            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
+        }
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FloatingNavigationButton("Apps", Icons.Default.CloudDownload, selectedPage == TopLevelPage.Apps.ordinal, pendingUpdates.size, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } })
+                FloatingNavigationButton("Websites", Icons.Default.Language, selectedPage == TopLevelPage.Websites.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } })
+                FloatingNavigationButton("Settings", Icons.Default.Settings, selectedPage == TopLevelPage.Settings.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } })
+            }
         }
     }
 
@@ -297,12 +272,30 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
     }
 }
 
+@Composable
+private fun FloatingNavigationButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, badgeCount: Int, onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+    ) {
+        BadgedBox(badge = { if (badgeCount > 0) Badge { Text(badgeCount.toString()) } }) {
+            Icon(icon, contentDescription = label, tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WebsitesPage() {
-    Scaffold(topBar = { TopAppBar(title = { Text("Websites") }) }) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            EmptyState("No websites added yet", "Add websites you want to keep close at hand.", Icons.Default.Language, null)
+    Scaffold { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().padding(20.dp)) {
+            Text("Websites", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                EmptyState("No websites added yet", "Add websites you want to keep close at hand.", Icons.Default.Language, null)
+            }
         }
     }
 }
@@ -338,18 +331,26 @@ private fun HomePage(
     }
     val totalUpdates = pendingUpdates.size
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Column { Text("Elmadani Store", fontWeight = FontWeight.Bold); Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-            actions = { IconButton(onClick = openSort) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") } }
-        )
-    }) { padding ->
-        PullToRefreshBox(isRefreshing = loading, onRefresh = vm::refresh, state = rememberPullToRefreshState(), modifier = Modifier.padding(padding).fillMaxSize()) {
+    Scaffold { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 112.dp)
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Elmadani Store", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = openSort) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") }
+                }
+            }
             when {
-                loading && apps.isEmpty() -> LoadingList()
-                error != null && apps.isEmpty() -> EmptyState("Could not load apps", error ?: "Try again", Icons.Default.CloudDownload, vm::refresh)
-                apps.isEmpty() -> EmptyState("No apps yet", "New updates will appear here.", Icons.Default.CloudDownload, vm::refresh)
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(20.dp)) {
+                loading && apps.isEmpty() -> item { LoadingList() }
+                error != null && apps.isEmpty() -> item { EmptyState("Could not load apps", error ?: "Try again", Icons.Default.CloudDownload, null) }
+                apps.isEmpty() -> item { EmptyState("No apps yet", "New updates will appear here.", Icons.Default.CloudDownload, null) }
+                else -> {
                     item {
                         Text("${apps.size} apps, ${totalUpdates} updates available.", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         if (totalUpdates >= 2) {
@@ -372,6 +373,9 @@ private fun HomePage(
                         AppCard(app, progress[app.repo], failedDownloads.contains(app.repo), { openDetails(app) }, { install(app) }, { retry(app) })
                     }
                 }
+            }
+            item {
+                RefreshButton(loading = loading, onClick = vm::refresh)
             }
         }
     }
@@ -602,8 +606,9 @@ private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings
     val feedbackSubject = Uri.encode("Elmadani Store feedback")
     val feedbackBody = Uri.encode("I'd like to share feedback about Elmadani Store.\n\nApp version: ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}\nAndroid: ${Build.VERSION.RELEASE}\n")
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { padding ->
+    Scaffold { padding ->
         Column(Modifier.padding(padding).padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f))) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("About Elmadani Store", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -650,6 +655,21 @@ private fun FAQItem(question: String, answer: String) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(question, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(answer, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun RefreshButton(loading: Boolean, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        OutlinedButton(onClick = onClick, enabled = !loading, shape = RoundedCornerShape(percent = 50)) {
+            if (loading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.CloudDownload, contentDescription = null)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(if (loading) "Refreshing" else "Refresh")
         }
     }
 }
@@ -705,8 +725,8 @@ private fun OnboardingScreen(onComplete: () -> Unit, onSkip: () -> Unit) {
 
 @Composable
 private fun LoadingList() {
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        items(4) { AppSkeletonCard() }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+        repeat(4) { AppSkeletonCard() }
     }
 }
 

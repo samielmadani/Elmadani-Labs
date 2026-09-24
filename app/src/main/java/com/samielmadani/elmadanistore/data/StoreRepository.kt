@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import android.util.Base64
 import androidx.core.content.FileProvider
+import com.samielmadani.elmadanistore.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -78,7 +79,7 @@ class StoreRepository(private val context: Context) {
         val installedCode = packageInfo?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
         return StoreApp(
             owner = "samielmadani", repo = "Elmadani-Store", name = "Elmadani Store",
-            description = "The store application", iconUrl = null,
+            description = "The store application", iconUrl = "android.resource://${context.packageName}/${R.mipmap.ic_launcher}",
             repositoryUrl = "https://github.com/$selfRepo", releaseId = release.optLong("id"),
             version = release.optString("tag_name"), releaseNotes = release.optString("body"),
             publishedAt = release.optString("published_at"), assetName = apk.optString("name"),
