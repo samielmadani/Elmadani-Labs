@@ -5,7 +5,9 @@ import android.content.pm.PackageInfo
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,6 +28,8 @@ data class TrackedAppEntity(
 
 class TrackingStore(private val context: Context) {
     private val key = stringPreferencesKey("entries")
+
+    fun flow(): Flow<List<TrackedAppEntity>> = context.trackingDataStore.data.map { decode(it[key]) }
 
     suspend fun all(): List<TrackedAppEntity> = decode(context.trackingDataStore.data.first()[key])
 
@@ -71,6 +75,22 @@ class TrackingStore(private val context: Context) {
         val current = all().associateBy { it.repo }.toMutableMap()
         current[repo]?.let { current[repo] = it.copy(packageName = packageName) }
         save(current.values)
+    }
+
+    suspend fun markPackageInstalled(packageName: String): TrackedAppEntity? {
+        val current = all().associateBy { it.repo }.toMutableMap()
+        val existing = current.values.firstOrNull { it.packageName == packageName } ?: return null
+        val installed = runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(packageName, 0)
+        }.getOrNull() ?: return null
+        val entity = existing.copy(
+            installedVersionCode = versionCode(installed),
+            installedVersionName = installed.versionName
+        )
+        current[entity.repo] = entity
+        save(current.values)
+        return entity
     }
 
     suspend fun markInstalled(app: StoreApp): TrackedAppEntity? {

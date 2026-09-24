@@ -501,7 +501,7 @@ private fun StatusChip(app: StoreApp, isInstalling: Boolean = false, failed: Boo
 
 @Composable
 private fun AppActionButton(app: StoreApp, onClick: () -> Unit) {
-    val label = if (app.hasUpdate) "Update" else if (app.isInstalled) "Up to date" else "Install"
+    val label = if (app.hasUpdate) "Update" else if (app.isInstalled) "Installed" else "Install"
     val enabled = app.needsInstall
     when {
         app.hasUpdate || !app.isInstalled -> Button(
@@ -563,7 +563,7 @@ private fun DetailPage(app: StoreApp, progress: Int?, failed: Boolean, vm: Store
                     ) {
                         Icon(Icons.Default.CloudDownload, null)
                         Spacer(Modifier.width(8.dp))
-                        Text(if (failed) "Retry download" else if (app.hasUpdate) "Update app" else if (app.isInstalled) "Up to date" else "Install app")
+                        Text(if (failed) "Retry download" else if (app.hasUpdate) "Update app" else if (app.isInstalled) "Installed" else "Install app")
                     }
                 }
                 if (progress != null && progress < 100) item { LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth()) }

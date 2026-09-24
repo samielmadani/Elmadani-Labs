@@ -10,6 +10,7 @@ import com.samielmadani.elmadanistore.data.StoreRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -36,7 +37,32 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     private val announcedReleases = mutableSetOf<String>()
     private var lastManualRefresh = 0L
 
-    init { refresh() }
+    init {
+        viewModelScope.launch {
+            repository.trackedApps().collectLatest { trackedApps ->
+                val trackedByRepo = trackedApps.associateBy { it.repo.lowercase() }
+                _apps.value = _apps.value.map { app ->
+                    trackedByRepo["${app.owner}/${app.repo}".lowercase()]?.let { tracked ->
+                        app.copy(
+                            installedVersion = tracked.installedVersionName,
+                            installedVersionCode = tracked.installedVersionCode,
+                            packageName = tracked.packageName ?: app.packageName
+                        )
+                    } ?: app
+                }
+                _selfUpdate.value = _selfUpdate.value?.let { app ->
+                    trackedByRepo["${app.owner}/${app.repo}".lowercase()]?.let { tracked ->
+                        app.copy(
+                            installedVersion = tracked.installedVersionName,
+                            installedVersionCode = tracked.installedVersionCode,
+                            packageName = tracked.packageName ?: app.packageName
+                        )
+                    } ?: app
+                }
+            }
+        }
+        refresh()
+    }
 
     fun refresh() {
         val now = System.currentTimeMillis()
@@ -76,7 +102,6 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadProgress.value = _downloadProgress.value + (app.repo to progress)
                 }
             }.onSuccess {
-                repository.recordInstalled(app)
                 _failedDownloads.value = _failedDownloads.value - app.repo
                 onReady(it)
             }.onFailure {
@@ -92,7 +117,6 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                 _downloadProgress.value = _downloadProgress.value + (app.repo to progress)
             }
         }.onSuccess {
-            repository.recordInstalled(app)
             _failedDownloads.value = _failedDownloads.value - app.repo
             return it
         }.onFailure {

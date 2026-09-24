@@ -8,6 +8,7 @@ import android.util.Base64
 import androidx.core.content.FileProvider
 import com.samielmadani.elmadanistore.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -69,7 +70,7 @@ class StoreRepository(private val context: Context) {
         apps
     }
 
-    private fun loadSelfUpdate(): StoreApp? {
+    private suspend fun loadSelfUpdate(): StoreApp? {
         val release = getJson("https://api.github.com/repos/$selfRepo/releases/latest") ?: return null
         val assets = release.optJSONArray("assets") ?: return null
         val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
@@ -77,7 +78,7 @@ class StoreRepository(private val context: Context) {
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         @Suppress("DEPRECATION")
         val installedCode = packageInfo?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
-        return StoreApp(
+        val app = StoreApp(
             owner = "samielmadani", repo = "Elmadani-Store", name = "Elmadani Store",
             description = "The store application", iconUrl = "android.resource://${context.packageName}/${R.mipmap.ic_launcher}",
             repositoryUrl = "https://github.com/$selfRepo", releaseId = release.optLong("id"),
@@ -86,6 +87,11 @@ class StoreRepository(private val context: Context) {
             assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"),
             prerelease = release.optBoolean("prerelease"), packageName = context.packageName,
             installedVersion = packageInfo?.versionName, installedVersionCode = installedCode
+        )
+        val tracked = trackingStore.recordLatest(app)
+        return app.copy(
+            installedVersion = tracked.installedVersionName ?: app.installedVersion,
+            installedVersionCode = tracked.installedVersionCode ?: app.installedVersionCode
         )
     }
 
@@ -108,7 +114,8 @@ class StoreRepository(private val context: Context) {
                 }
             } }
         }
-        preferences.edit().putString("installed_${app.repo}", app.version).apply()
+        val packageName = app.packageName ?: context.packageManager.getPackageArchiveInfo(target.path, 0)?.packageName
+        packageName?.let { trackingStore.updatePackageName(app.repo, it) }
         target
     }
 
@@ -183,6 +190,8 @@ class StoreRepository(private val context: Context) {
     }
 
     suspend fun recordInstalled(app: StoreApp): TrackedAppEntity? = trackingStore.markInstalled(app)
+    fun trackedApps(): Flow<List<TrackedAppEntity>> = trackingStore.flow()
+    suspend fun recordPackageInstalled(packageName: String): TrackedAppEntity? = trackingStore.markPackageInstalled(packageName)
 
     private fun iconFor(owner: String, repo: String) = "https://raw.githubusercontent.com/$owner/$repo/main/public/icon-512.png"
 
