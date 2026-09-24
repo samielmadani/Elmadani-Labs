@@ -8,6 +8,8 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.material3.Typography
 import com.samielmadani.elmadanistore.data.ThemeMode
 
 @Composable
@@ -21,5 +23,14 @@ fun ElmadaniStoreTheme(content: @Composable () -> Unit) {
         if (android.os.Build.VERSION.SDK_INT >= 31) dynamicLightColorScheme(context) else lightColorScheme()
     }
     val colors = base.copy(primary = ThemeSettings.accent.value)
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(
+        colorScheme = colors,
+        typography = Typography().copy(
+            headlineLarge = Typography().headlineLarge.copy(fontFamily = FontFamily.Serif),
+            headlineMedium = Typography().headlineMedium.copy(fontFamily = FontFamily.Serif),
+            headlineSmall = Typography().headlineSmall.copy(fontFamily = FontFamily.Serif),
+            titleLarge = Typography().titleLarge.copy(fontFamily = FontFamily.Serif)
+        ),
+        content = content
+    )
 }

@@ -28,7 +28,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,7 +39,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -47,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -101,13 +105,17 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
 private fun HomePage(apps: List<StoreApp>, loading: Boolean, error: String?, progress: Map<String, Int>, vm: StoreViewModel, openDetails: (StoreApp) -> Unit, openSettings: () -> Unit) {
     val context = LocalContext.current
     var sort by remember { mutableStateOf(SortMode.UPDATED) }
-    var menuOpen by remember { mutableStateOf(false) }
+    var sortSheetOpen by remember { mutableStateOf(false) }
     val shownApps = vm.sorted(sort)
     Scaffold(topBar = {
         TopAppBar(title = { Column { Text("Elmadani Store", fontWeight = FontWeight.Bold); Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }, actions = {
-            Box { IconButton(onClick = { menuOpen = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") }; DropdownMenu(menuOpen, { menuOpen = false }) { SortMode.entries.forEach { mode -> DropdownMenuItem(text = { Text(mode.label) }, onClick = { sort = mode; menuOpen = false }) } } }
-            IconButton(onClick = openSettings) { Icon(Icons.Default.Settings, "Settings") }
+            IconButton(onClick = { sortSheetOpen = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") }
         })
+    }, bottomBar = {
+        NavigationBar {
+            NavigationBarItem(selected = true, onClick = {}, icon = { Icon(Icons.Default.CloudDownload, null) }, label = { Text("Apps") })
+            NavigationBarItem(selected = false, onClick = openSettings, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
+        }
     }) { padding ->
         PullToRefreshBox(isRefreshing = loading, onRefresh = vm::refresh, state = rememberPullToRefreshState(), modifier = Modifier.padding(padding).fillMaxSize()) {
             when {
@@ -118,6 +126,17 @@ private fun HomePage(apps: List<StoreApp>, loading: Boolean, error: String?, pro
                     item { Text("Available apps", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("Install directly from GitHub Releases", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(shownApps, key = { it.repo }) { app -> AppCard(app, progress[app.repo], { openDetails(app) }) { vm.download(app) { file -> context.startActivity(vm.install(file)) } } }
                 }
+            }
+        }
+    }
+    if (sortSheetOpen) {
+        ModalBottomSheet(onDismissRequest = { sortSheetOpen = false }, sheetState = rememberModalBottomSheetState()) {
+            Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Sort apps", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                SortMode.entries.forEach { mode ->
+                    DropdownMenuItem(text = { Text(mode.label) }, onClick = { sort = mode; sortSheetOpen = false })
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -133,11 +152,19 @@ private fun AppCard(app: StoreApp, progress: Int?, openDetails: () -> Unit, inst
             }
             Spacer(Modifier.height(16.dp)); Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(app.version, fontWeight = FontWeight.Medium); Text("  •  ${app.formattedSize}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.weight(1f));
+                StatusChip(app)
+                Spacer(Modifier.width(8.dp))
                 if (progress != null && progress < 100) { CircularProgressIndicator(progress = { progress / 100f }, modifier = Modifier.size(24.dp), strokeWidth = 3.dp) } else { Button(onClick = install, enabled = !app.isInstalled || app.hasUpdate, shape = RoundedCornerShape(14.dp)) { Text(if (app.hasUpdate) "Update" else if (app.isInstalled) "Up to date" else "Install") } }
             }
             if (progress != null && progress < 100) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth()) }
         }
     }
+}
+
+@Composable
+private fun StatusChip(app: StoreApp) {
+    val color = if (app.hasUpdate) Color(0xFFC24D38) else Color(0xFF2E7D62)
+    AssistChip(onClick = {}, enabled = false, label = { Text(if (app.hasUpdate) "Update available" else if (app.isInstalled) "Up to date" else "Ready") }, leadingIcon = { Icon(Icons.Default.CheckCircle, null) }, colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(disabledContainerColor = color.copy(alpha = .15f), disabledLabelColor = color, disabledLeadingIconContentColor = color))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -166,12 +193,21 @@ private fun SettingsPage(vm: StoreViewModel, back: () -> Unit) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(false) }
+    var ignoredRepos by remember { mutableStateOf(vm.ignoredRepos().joinToString("\n")) }
+    var ignoredSaved by remember { mutableStateOf(false) }
+    val rateLimit by vm.rateLimit.collectAsState()
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }, navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
             Text("GitHub access", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("A personal access token increases API limits and enables private repositories. It is stored only on this device.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(token, { token = it; saved = false }, modifier = Modifier.fillMaxWidth(), label = { Text("Personal access token") }, singleLine = true)
             Button(onClick = { vm.saveToken(token); saved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth()) { Text(if (saved) "Saved" else "Save token") }
+            Text("API status", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("${rateLimit.remaining?.toString() ?: "Unknown"} requests remaining${rateLimit.limit?.let { " of $it" } ?: ""}. Reset: ${rateLimit.resetText}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Ignored repositories", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("One owner/repo per line. Ignored repositories are never fetched or shown.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedTextField(ignoredRepos, { ignoredRepos = it; ignoredSaved = false }, modifier = Modifier.fillMaxWidth(), label = { Text("owner/repo") }, minLines = 2)
+            OutlinedButton(onClick = { vm.saveIgnoredRepos(ignoredRepos); ignoredSaved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth()) { Text(if (ignoredSaved) "Ignored list saved" else "Save ignored list") }
             Text("Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text("Theme", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) { ThemeMode.entries.forEach { mode -> TextButton(onClick = { ThemeSettings.setMode(mode) }) { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) } } }

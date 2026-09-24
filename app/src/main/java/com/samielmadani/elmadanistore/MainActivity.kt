@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.mutableStateOf
 import com.samielmadani.elmadanistore.ui.StoreApp
 import com.samielmadani.elmadanistore.ui.theme.ElmadaniStoreTheme
@@ -15,6 +16,7 @@ class MainActivity : ComponentActivity() {
     private val openRepo = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         openRepo.value = intent.getStringExtra("open_repo")
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

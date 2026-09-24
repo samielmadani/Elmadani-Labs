@@ -30,6 +30,18 @@ import java.time.format.DateTimeFormatter
     val formattedSize get() = if (assetSize < 1_048_576) "${assetSize / 1024} KB" else "%.1f MB".format(assetSize / 1_048_576f)
 }
 
+data class RateLimitStatus(
+    val remaining: Int? = null,
+    val limit: Int? = null,
+    val resetAt: Long? = null
+) {
+    val resetText: String
+        get() = resetAt?.let {
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                .format(java.util.Date(it * 1000))
+        } ?: "Unknown"
+}
+
 data class ReleaseSummary(
     val version: String,
     val notes: String,
