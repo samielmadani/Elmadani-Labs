@@ -361,7 +361,7 @@ private fun SettingsPage(vm: StoreViewModel) {
 private fun WebsitesPage() {
     Scaffold(topBar = { TopAppBar(title = { Text("Websites") }) }) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            EmptyState("No websites added yet", "Websites you add will appear here.", Icons.Default.Language, null)
+            EmptyState("No websites added yet", "Websites by Sami will appear here.", Icons.Default.Language, null)
         }
     }
 }
