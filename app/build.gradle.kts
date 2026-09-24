@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "com.elmadanilabs.app"
+    namespace = "com.samielmadani.elmadanistore"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.elmadanilabs.app"
+        applicationId = "com.samielmadani.elmadanistore"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
     }
 
     compileOptions {
@@ -24,39 +24,24 @@ android {
         compose = true
         buildConfig = true
     }
-    val productionReleaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
     signingConfigs {
-        create("release") {
-            val keystorePath = providers.environmentVariable("ELMADANI_KEYSTORE_PATH").orNull
-            val keystorePassword = providers.environmentVariable("ELMADANI_KEYSTORE_PASSWORD").orNull
-            val keyAliasValue = providers.environmentVariable("ELMADANI_KEY_ALIAS").orNull
-            val keyPasswordValue = providers.environmentVariable("ELMADANI_KEY_PASSWORD").orNull
-            require(!productionReleaseRequested || (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank())) {
-                "Production release signing requires ELMADANI_KEYSTORE_PATH, ELMADANI_KEYSTORE_PASSWORD, ELMADANI_KEY_ALIAS, and ELMADANI_KEY_PASSWORD."
-            }
-            if (!keystorePath.isNullOrBlank()) {
-                storeFile = file(keystorePath)
-                storePassword = keystorePassword
-                keyAlias = keyAliasValue
-                keyPassword = keyPasswordValue
-            }
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
     buildTypes {
-        debug {
-            val keystorePath = providers.environmentVariable("ELMADANI_KEYSTORE_PATH").orNull
-            val keystorePassword = providers.environmentVariable("ELMADANI_KEYSTORE_PASSWORD").orNull
-            val keyAliasValue = providers.environmentVariable("ELMADANI_KEY_ALIAS").orNull
-            val keyPasswordValue = providers.environmentVariable("ELMADANI_KEY_PASSWORD").orNull
-            if (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
-        }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
         }
     }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs.keepDebugSymbols += "**/libandroidx.graphics.path.so"
+        jniLibs.keepDebugSymbols += "**/libdatastore_shared_counter.so"
+    }
     kotlinOptions { jvmTarget = "17" }
 }
 
@@ -69,6 +54,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")

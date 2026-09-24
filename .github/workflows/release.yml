@@ -1,4 +1,4 @@
-name: Release Elmadani
+name: Release Elmadani Store
 
 on:
   push:
@@ -27,22 +27,6 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
-
-      - name: Prepare production signing
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ELMADANI_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ELMADANI_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ELMADANI_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ELMADANI_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$KEYSTORE_BASE64" || { echo "Missing ELMADANI_KEYSTORE_BASE64"; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "Missing ELMADANI_KEYSTORE_PASSWORD"; exit 1; }
-          test -n "$KEY_ALIAS" || { echo "Missing ELMADANI_KEY_ALIAS"; exit 1; }
-          test -n "$KEY_PASSWORD" || { echo "Missing ELMADANI_KEY_PASSWORD"; exit 1; }
-          keystore_path="$RUNNER_TEMP/elmadani-release.jks"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
-          echo "ELMADANI_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
 
       - name: Determine unique Android version
         id: version
@@ -83,33 +67,16 @@ jobs:
           echo "name=$version_name" >> "$GITHUB_OUTPUT"
           echo "code=$version_code" >> "$GITHUB_OUTPUT"
           echo "tag=v$version_name" >> "$GITHUB_OUTPUT"
-          echo "asset=elmadani-labs-$version_name.apk" >> "$GITHUB_OUTPUT"
+          echo "asset=elmadani-store-$version_name.apk" >> "$GITHUB_OUTPUT"
 
-      - name: Build release APK
-        env:
-          ELMADANI_KEYSTORE_PASSWORD: ${{ secrets.ELMADANI_KEYSTORE_PASSWORD }}
-          ELMADANI_KEY_ALIAS: ${{ secrets.ELMADANI_KEY_ALIAS }}
-          ELMADANI_KEY_PASSWORD: ${{ secrets.ELMADANI_KEY_PASSWORD }}
+      - name: Build debug APK
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
-          test -f app/build/outputs/apk/release/app-release.apk
-
-      - name: Extract app metadata
-        run: |
-          set -euo pipefail
-          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          badging=$($build_tools/aapt dump badging app/build/outputs/apk/release/app-release.apk)
-          package_name=$(printf '%s\n' "$badging" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")
-          version_name=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionName='\\([^']*\\)'.*/\\1/p")
-          version_code=$(printf '%s\n' "$badging" | sed -n "s/^package:.*versionCode='\\([^']*\\)'.*/\\1/p")
-          test -n "$package_name" && test -n "$version_name" && test -n "$version_code"
-          printf '{"packageName":"%s","versionName":"%s","versionCode":%s}\n' "$package_name" "$version_name" "$version_code" > app/build/outputs/apk/release/elmadani-app.json
-          python3 -c 'import pathlib,sys,zipfile; apk_path,icon_path,source_icon=sys.argv[1:]; apk=zipfile.ZipFile(apk_path); candidates=[(info.file_size,info.filename) for info in apk.infolist() if info.filename.lower().endswith(".png") and info.filename.startswith(("res/mipmap","res/drawable"))]; selected=max(candidates)[1] if candidates else None; pathlib.Path(icon_path).write_bytes(apk.read(selected) if selected else pathlib.Path(source_icon).read_bytes()); apk.close()' \
-            app/build/outputs/apk/release/app-release.apk \
-            app/build/outputs/apk/release/elmadani-app-icon.png \
-            app/src/main/res/drawable/icon.png
+          test -f app/debug.keystore
+          keytool -list -keystore app/debug.keystore -storepass android -alias androiddebugkey >/dev/null
+          ./gradlew assembleDebug --no-daemon
+          test -f app/build/outputs/apk/debug/app-debug.apk
 
       - name: Publish GitHub Release
         env:
@@ -121,13 +88,11 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          apk_path="app/build/outputs/apk/release/app-release.apk"
-          release_notes=$(printf '## Elmadani Labs %s\n\n- Version: `%s`\n- Version code: `%s`\n- Commit: `%s`\n- Build date: `%s`\n- APK: `%s`\n\n### Changes\n' "$RELEASE_TAG" "$VERSION_NAME" "$VERSION_CODE" "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ASSET_NAME")
+          apk_path="app/build/outputs/apk/debug/app-debug.apk"
+          release_notes=$(printf '## Elmadani Store %s\n\n- Version: `%s`\n- Version code: `%s`\n- Commit: `%s`\n- Build date: `%s`\n- APK: `%s`\n\n### Changes\n' "$RELEASE_TAG" "$VERSION_NAME" "$VERSION_CODE" "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ASSET_NAME")
           gh release create "$RELEASE_TAG" "$apk_path#$ASSET_NAME" \
-            "app/build/outputs/apk/release/elmadani-app.json#elmadani-app.json" \
-            "app/build/outputs/apk/release/elmadani-app-icon.png#elmadani-app-icon.png" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Elmadani Labs $RELEASE_TAG" \
+            --title "Elmadani Store $RELEASE_TAG" \
             --generate-notes \
             --notes "$release_notes" \
             --target "$COMMIT_SHA"

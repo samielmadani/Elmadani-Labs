@@ -1,16 +1,16 @@
-# Elmadani
+# Elmadani Store
 
-Private Android app catalogue backed by public GitHub Releases.
+Private Android app catalogue backed by GitHub Releases. It discovers APK releases from repositories owned by `samielmadani`, shows release notes, and downloads APKs directly to Android's installer.
 
 ## Build
 
 Open the project in Android Studio, or run `./gradlew assembleDebug` from Windows, Linux, macOS, or Termux after generating the Gradle wrapper. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-Edit only the `githubUsername` value in `app/src/main/assets/apps.json` if the account changes. Repositories are discovered automatically from that account through the GitHub REST API; no application list, APK URL, package name, or version number is maintained in Elmadani Labs.
+The application ID is `com.samielmadani.elmadanistore`. Add a GitHub personal access token in Settings when higher API limits or private repositories are needed. The token stays on the device.
 
-The app loads cached release metadata first, then synchronizes repository and release pages in the background using pagination and ETags. Only published releases with APK assets enter the catalogue. APK binaries are downloaded only after the user selects INSTALL or UPDATE.
+The app supports dynamic colors, Light, Dark, OLED, manual accent colors, sorting, cached APK cleanup, background release checks, update notifications, and per-app display-name overrides.
 
-Release builds require a configured production keystore through `ELMADANI_KEYSTORE_PATH`, `ELMADANI_KEYSTORE_PASSWORD`, `ELMADANI_KEY_ALIAS`, and `ELMADANI_KEY_PASSWORD`. Debug builds remain available locally without those variables.
+GitHub Releases publish the unsigned debug APK for manual installation. Android may require allowing installs from unknown sources.
 
 The current configuration is `samielmadani` and `samielmadani/Elmadani-Labs`; the account must expose repositories and the self repository must have a published APK release before the catalogue or self-update screen can show data.
 
@@ -18,14 +18,7 @@ Private repositories are supported by saving a GitHub personal access token in S
 
 ## Automatic Releases
 
-Pushes to `master` run `.github/workflows/release.yml`. The workflow reads the Gradle `versionName` and `versionCode`, builds `app/build/outputs/apk/release/app-release.apk`, and publishes `elmadani-labs-<versionName>.apk` to a GitHub Release tagged `v<versionName>`. If that tag already exists, it increments the patch version and versionCode in the runner workspace for that release build, without committing generated APKs or version changes back to the repository.
-
-Production release builds require these GitHub Actions secrets:
-
-- `ELMADANI_KEYSTORE_BASE64`
-- `ELMADANI_KEYSTORE_PASSWORD`
-- `ELMADANI_KEY_ALIAS`
-- `ELMADANI_KEY_PASSWORD`
+Pushes to `master` run `.github/workflows/release.yml`. The workflow reads the Gradle `versionName` and `versionCode`, builds `app/build/outputs/apk/debug/app-debug.apk`, and publishes it as `elmadani-store-<versionName>.apk` to a GitHub Release tagged `v<versionName>`.
 
 To activate the workflow from the current branch:
 
