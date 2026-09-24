@@ -3,6 +3,7 @@ package com.samielmadani.elmadanistore.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.util.Base64
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -19,14 +20,19 @@ class StoreRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences("store", Context.MODE_PRIVATE)
     private val trackingStore = TrackingStore(context)
     private val username = "samielmadani"
-    private val defaultIgnoredRepos = setOf("samielmadani/elmadani-store")
+    private val selfRepo = "samielmadani/Elmadani-Store"
+    private val defaultIgnoredRepos = setOf(selfRepo)
+
+    @Volatile
+    var latestSelfUpdate: StoreApp? = null
+        private set
 
     @Volatile
     var rateLimitStatus: RateLimitStatus = RateLimitStatus()
         private set
 
     suspend fun loadApps(): List<StoreApp> = withContext(Dispatchers.IO) {
-        val repositories = getJsonArray("https://api.github.com/users/$username/repos?type=owner&per_page=100") ?: return@withContext emptyList()
+        val repositories = getJsonArray("https://api.github.com/users/$username/repos?type=owner&per_page=100", reportHttpError = true) ?: return@withContext emptyList()
         val ignored = ignoredRepos()
         val repoObjects = (0 until repositories.length()).mapNotNull { repositories.optJSONObject(it) }
             .filterNot { ignored.contains(repoKey(username, it.optString("name"))) }
@@ -56,7 +62,28 @@ class StoreRepository(private val context: Context) {
             app.copy(installedVersion = reconciled?.installedVersionName ?: tracked.installedVersionName, installedVersionCode = reconciled?.installedVersionCode ?: tracked.installedVersionCode)
         }
         preferences.edit().putString("apps_cache", apps.joinToString("\n") { "${it.owner}|${it.repo}|${it.version}|${it.description}" }).apply()
+        latestSelfUpdate = loadSelfUpdate()
         apps
+    }
+
+    private fun loadSelfUpdate(): StoreApp? {
+        val release = getJson("https://api.github.com/repos/$selfRepo/releases/latest") ?: return null
+        val assets = release.optJSONArray("assets") ?: return null
+        val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
+            .firstOrNull { it.optString("name").endsWith(".apk", true) } ?: return null
+        val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+        @Suppress("DEPRECATION")
+        val installedCode = packageInfo?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
+        return StoreApp(
+            owner = "samielmadani", repo = "Elmadani-Store", name = "Elmadani Store",
+            description = "The store application", iconUrl = null,
+            repositoryUrl = "https://github.com/$selfRepo", releaseId = release.optLong("id"),
+            version = release.optString("tag_name"), releaseNotes = release.optString("body"),
+            publishedAt = release.optString("published_at"), assetName = apk.optString("name"),
+            assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"),
+            prerelease = release.optBoolean("prerelease"), packageName = context.packageName,
+            installedVersion = packageInfo?.versionName, installedVersionCode = installedCode
+        )
     }
 
     suspend fun download(app: StoreApp, onProgress: (Int) -> Unit): File = withContext(Dispatchers.IO) {
@@ -99,29 +126,38 @@ class StoreRepository(private val context: Context) {
 
     private fun getJson(url: String): JSONObject? = request(url)?.let { runCatching { JSONObject(it) }.getOrNull() }
 
-    private fun getJsonArray(url: String): JSONArray? = request(url)?.let { runCatching { JSONArray(it) }.getOrNull() }
+    private fun getJsonArray(url: String, reportHttpError: Boolean = false): JSONArray? = request(url, reportHttpError)?.let { runCatching { JSONArray(it) }.getOrNull() }
 
-    private fun request(url: String): String? = runCatching {
+    private fun request(url: String, reportHttpError: Boolean = false): String? = runCatching {
         val cacheKey = "cache_${url.hashCode()}"
         val cached = preferences.getString("${cacheKey}_body", null)
+        val token = token()
+        Log.d(TAG, "GitHub request: $url; tokenPresent=${token.isNotBlank()}; authorizationAttached=${token.isNotBlank()}; tokenLength=${token.length}")
         val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "Elmadani-Store")
             .apply {
                 preferences.getString("${cacheKey}_etag", null)?.let { header("If-None-Match", it) }
-                token().takeIf(String::isNotBlank)?.let { header("Authorization", "Bearer $it") }
+                token.takeIf(String::isNotBlank)?.let { header("Authorization", "Bearer $it") }
             }.build()
         client.newCall(request).execute().use { response ->
             updateRateLimit(response)
+            val body = response.body?.string().orEmpty()
+            Log.d(TAG, "GitHub response: ${response.code} ${response.message}; body=${body.take(LOG_BODY_LIMIT)}")
             when {
                 response.code == 304 -> cached
                 response.code == 403 && response.header("X-RateLimit-Remaining") == "0" -> throw RateLimitException(rateLimitStatus.resetAt)
-                response.isSuccessful -> response.body?.string()?.also { body ->
+                response.isSuccessful -> body.also {
                     preferences.edit().putString("${cacheKey}_body", body).apply()
                     response.header("ETag")?.let { preferences.edit().putString("${cacheKey}_etag", it).apply() }
                 }
+                reportHttpError -> throw GithubApiException(response.code, body)
                 else -> null
             }
         }
-    }.getOrElse { error -> if (error is RateLimitException) throw error else null }
+    }.getOrElse { error ->
+        if (error is RateLimitException || error is GithubApiException) throw error
+        Log.e(TAG, "GitHub request failed: $url", error)
+        null
+    }
 
     private fun updateRateLimit(response: okhttp3.Response) {
         rateLimitStatus = RateLimitStatus(
@@ -149,6 +185,13 @@ class StoreRepository(private val context: Context) {
 
     private fun repoKey(owner: String, repo: String) = "${owner.lowercase()}/${repo.lowercase()}"
     private fun normaliseRepo(value: String) = value.trim().trim('/').lowercase()
+
+    private companion object {
+        const val TAG = "StoreRepository"
+        const val LOG_BODY_LIMIT = 500
+    }
 }
 
 class RateLimitException(resetAt: Long?) : Exception("GitHub is rate limited. Retry at ${resetAt?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it * 1000)) } ?: "the reset time"}.")
+
+class GithubApiException(val statusCode: Int, responseBody: String) : Exception("GitHub API returned HTTP $statusCode: ${responseBody.take(500)}")

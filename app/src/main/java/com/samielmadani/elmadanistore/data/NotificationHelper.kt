@@ -12,6 +12,10 @@ import com.samielmadani.elmadanistore.R
 object NotificationHelper {
     private const val CHANNEL = "release_updates"
     fun showUpdate(context: Context, app: StoreApp) {
+        val preferences = context.getSharedPreferences("store", Context.MODE_PRIVATE)
+        val notificationKey = "notified_release_${app.owner}_${app.repo}"
+        if (preferences.getLong(notificationKey, 0L) == app.releaseId) return
+        preferences.edit().putLong(notificationKey, app.releaseId).apply()
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Release updates", NotificationManager.IMPORTANCE_DEFAULT))
         val detailIntent = Intent(context, com.samielmadani.elmadanistore.MainActivity::class.java)

@@ -27,6 +27,7 @@ import java.time.format.DateTimeFormatter
 ) {
     val isInstalled get() = installedVersion != null
     val hasUpdate get() = isInstalled && (releaseVersionCode?.let { installedVersionCode?.let { installed -> it > installed } } ?: (version != installedVersion))
+    val needsInstall get() = !isInstalled || hasUpdate
     val formattedSize get() = if (assetSize < 1_048_576) "${assetSize / 1024} KB" else "%.1f MB".format(assetSize / 1_048_576f)
 }
 

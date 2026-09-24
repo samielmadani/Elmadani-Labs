@@ -10,6 +10,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.mutableStateOf
 import com.samielmadani.elmadanistore.ui.StoreApp
 import com.samielmadani.elmadanistore.ui.theme.ElmadaniStoreTheme
+import com.samielmadani.elmadanistore.ui.theme.ThemeSettings
 import com.samielmadani.elmadanistore.worker.UpdateScheduler
 
 class MainActivity : ComponentActivity() {
@@ -18,6 +19,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        ThemeSettings.initialize(this)
         openRepo.value = intent.getStringExtra("open_repo")
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 42)

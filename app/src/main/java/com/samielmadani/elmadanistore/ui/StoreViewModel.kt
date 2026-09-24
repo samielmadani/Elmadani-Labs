@@ -24,6 +24,9 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     val downloadProgress: StateFlow<Map<String, Int>> = _downloadProgress.asStateFlow()
     private val _rateLimit = MutableStateFlow(RateLimitStatus())
     val rateLimit: StateFlow<RateLimitStatus> = _rateLimit.asStateFlow()
+    private val _updateNotice = MutableStateFlow<String?>(null)
+    val updateNotice: StateFlow<String?> = _updateNotice.asStateFlow()
+    private val announcedReleases = mutableSetOf<String>()
     private var lastManualRefresh = 0L
 
     init { refresh() }
@@ -32,8 +35,20 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
         if (repository.isManualRefreshThrottled(now) || (_apps.value.isNotEmpty() && now - lastManualRefresh < 60_000L)) return
         lastManualRefresh = now
         repository.markManualRefresh(now)
-        viewModelScope.launch { _loading.value = true; _error.value = null; runCatching { repository.loadApps() }.onSuccess { _apps.value = it }.onFailure { _error.value = it.message ?: "Could not connect to GitHub" }; _rateLimit.value = repository.rateLimitStatus; _loading.value = false }
+        viewModelScope.launch {
+            _loading.value = true
+            _error.value = null
+            runCatching { repository.loadApps() }.onSuccess {
+                _apps.value = it
+                val updates = (it.filter { app -> app.needsInstall } + listOfNotNull(repository.latestSelfUpdate?.takeIf { app -> app.hasUpdate }))
+                    .filter { app -> announcedReleases.add("${app.owner}/${app.repo}:${app.releaseId}") }
+                if (updates.isNotEmpty()) _updateNotice.value = if (updates.size == 1) "${updates.single().name} has an update available" else "${updates.size} updates are available"
+            }.onFailure { _error.value = it.message ?: "Could not connect to GitHub" }
+            _rateLimit.value = repository.rateLimitStatus
+            _loading.value = false
+        }
     }
+    fun dismissUpdateNotice() { _updateNotice.value = null }
     fun download(app: StoreApp, onReady: (java.io.File) -> Unit) { viewModelScope.launch { runCatching { repository.download(app) { progress -> _downloadProgress.value = _downloadProgress.value + (app.repo to progress) } }.onSuccess { onReady(it) }.onFailure { _error.value = it.message } } }
     fun install(file: java.io.File) = repository.install(file)
     fun clearDownloads() = repository.clearDownloads()
