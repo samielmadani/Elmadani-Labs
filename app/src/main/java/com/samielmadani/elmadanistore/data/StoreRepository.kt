@@ -55,7 +55,9 @@ class StoreRepository(private val context: Context) {
                 }
             }.orEmpty()
             val displayName = overrideName(name).orEmpty().ifBlank { metadata?.optString("name").orEmpty().ifBlank { name } }
-            val description = metadata?.optString("description").orEmpty().ifBlank { repo.optString("description").ifBlank { "Android app from $owner" } }
+            val description = normalizeDescription(metadata?.optString("description"))
+                ?: normalizeDescription(repo.optString("description"))
+                ?: "No description provided."
             val app = StoreApp(owner = owner, repo = name, name = displayName, description = description, iconUrl = iconFor(owner, name), repositoryUrl = "https://github.com/$owner/$name", releaseId = release.optLong("id"), version = release.optString("tag_name"), releaseNotes = release.optString("body"), publishedAt = release.optString("published_at"), assetName = apk.optString("name"), assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"), prerelease = release.optBoolean("prerelease"), packageName = packageName, releaseVersionCode = releaseVersionCode, releases = history)
             val tracked = trackingStore.recordLatest(app)
             val reconciled = trackingStore.reconcileInstalled(app)
@@ -179,9 +181,13 @@ class StoreRepository(private val context: Context) {
         return assets.metadataAsset()?.let { getJson(it.optString("browser_download_url")) }
     }
 
+    suspend fun recordInstalled(app: StoreApp): TrackedAppEntity? = trackingStore.markInstalled(app)
+
     private fun iconFor(owner: String, repo: String) = "https://raw.githubusercontent.com/$owner/$repo/main/public/icon-512.png"
 
     private fun JSONArray.metadataAsset(): JSONObject? = (0 until length()).mapNotNull { optJSONObject(it) }.firstOrNull { it.optString("name").equals("elmadani-app.json", true) }
+
+    private fun normalizeDescription(raw: String?): String? = raw?.trim()?.takeUnless { it.equals("null", true) || it.equals("<null>", true) }?.takeIf { it.isNotBlank() }
 
     private fun repoKey(owner: String, repo: String) = "${owner.lowercase()}/${repo.lowercase()}"
     private fun normaliseRepo(value: String) = value.trim().trim('/').lowercase()

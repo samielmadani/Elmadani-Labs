@@ -69,8 +69,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -181,8 +183,15 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
         snapshotFlow { pagerState.currentPage }.collect { selectedPage = it }
     }
     LaunchedEffect(updateNotice) {
-        updateNotice?.let {
-            snackbarHostState.showSnackbar(it)
+        updateNotice?.let { notice ->
+            val result = snackbarHostState.showSnackbar(
+                message = notice.message,
+                actionLabel = "Install",
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                handleInstall(notice.app)
+            }
             storeViewModel.dismissUpdateNotice()
         }
     }
@@ -233,7 +242,7 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
         Box(Modifier.padding(padding).fillMaxSize()) {
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                 when (TopLevelPage.entries[page]) {
-                    TopLevelPage.Apps -> HomePage(apps, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
+                    TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
                     TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
                 }
             }
@@ -282,6 +291,7 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
 @Composable
 private fun HomePage(
     apps: List<StoreApp>,
+    selfUpdate: StoreApp?,
     loading: Boolean,
     error: String?,
     progress: Map<String, Int>,
@@ -298,7 +308,11 @@ private fun HomePage(
 ) {
     var sort by remember { mutableStateOf(SortMode.UPDATED) }
     var search by rememberSaveable { mutableStateOf("") }
-    val shownApps = vm.sorted(sort).filter { app ->
+    val listApps = buildList {
+        addAll(vm.sorted(sort))
+        selfUpdate?.takeIf { it.hasUpdate }?.let { add(it) }
+    }.distinctBy { it.repo }
+    val shownApps = listApps.filter { app ->
         val needle = search.trim()
         if (needle.isBlank()) true else app.name.contains(needle, ignoreCase = true) || app.description.contains(needle, ignoreCase = true)
     }
@@ -564,8 +578,6 @@ private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(false) }
-    var ignoredRepos by remember { mutableStateOf(vm.ignoredRepos().joinToString("\n")) }
-    var ignoredSaved by remember { mutableStateOf(false) }
     val rateLimit by vm.rateLimit.collectAsState()
     val feedbackSubject = Uri.encode("Elmadani Store feedback")
     val feedbackBody = Uri.encode("I'd like to share feedback about Elmadani Store.\n\nApp version: ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}\nAndroid: ${Build.VERSION.RELEASE}\n")
@@ -598,10 +610,6 @@ private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings
             Button(onClick = { vm.saveToken(token); saved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text(if (saved) "Saved" else "Save token") }
             Text("API status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("${rateLimit.remaining?.toString() ?: "Unknown"} requests remaining${rateLimit.limit?.let { " of $it" } ?: ""}. Reset: ${rateLimit.resetText}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Ignored repositories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("One owner/repo per line. Ignored repositories are never fetched or shown.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(ignoredRepos, { ignoredRepos = it; ignoredSaved = false }, modifier = Modifier.fillMaxWidth(), label = { Text("owner/repo") }, minLines = 2)
-            FilledTonalButton(onClick = { vm.saveIgnoredRepos(ignoredRepos); ignoredSaved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Text(if (ignoredSaved) "Ignored list saved" else "Save ignored list") }
             Text("Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text("Theme", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) { ThemeMode.entries.forEach { mode -> TextButton(onClick = { ThemeSettings.setMode(mode) }) { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) } } }

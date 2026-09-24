@@ -73,6 +73,38 @@ class TrackingStore(private val context: Context) {
         save(current.values)
     }
 
+    suspend fun markInstalled(app: StoreApp): TrackedAppEntity? {
+        val current = all().associateBy { it.repo }.toMutableMap()
+        val existing = current[app.repo]
+        val packageName = app.packageName ?: existing?.packageName ?: return existing
+        val entity = (existing ?: TrackedAppEntity(
+            repo = app.repo,
+            packageName = packageName,
+            installedVersionCode = null,
+            installedVersionName = null,
+            lastCheckedAt = 0L,
+            latestVersion = app.version,
+            latestVersionCode = app.releaseVersionCode,
+            latestAssetName = app.assetName,
+            latestAssetSize = app.assetSize,
+            latestDownloadUrl = app.downloadUrl
+        )).copy(
+            repo = app.repo,
+            packageName = packageName,
+            installedVersionCode = app.releaseVersionCode ?: existing?.installedVersionCode,
+            installedVersionName = app.version.ifBlank { existing?.installedVersionName },
+            lastCheckedAt = System.currentTimeMillis(),
+            latestVersion = app.version,
+            latestVersionCode = app.releaseVersionCode,
+            latestAssetName = app.assetName,
+            latestAssetSize = app.assetSize,
+            latestDownloadUrl = app.downloadUrl
+        )
+        current[app.repo] = entity
+        save(current.values)
+        return entity
+    }
+
     private suspend fun save(entries: Collection<TrackedAppEntity>) {
         context.trackingDataStore.edit { it[key] = encode(entries) }
     }

@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+data class UpdateNotice(val app: StoreApp, val message: String)
+
 class StoreViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = StoreRepository(application)
     private val _apps = MutableStateFlow<List<StoreApp>>(emptyList())
@@ -29,8 +31,8 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     val rateLimit: StateFlow<RateLimitStatus> = _rateLimit.asStateFlow()
     private val _selfUpdate = MutableStateFlow<StoreApp?>(null)
     val selfUpdate: StateFlow<StoreApp?> = _selfUpdate.asStateFlow()
-    private val _updateNotice = MutableStateFlow<String?>(null)
-    val updateNotice: StateFlow<String?> = _updateNotice.asStateFlow()
+    private val _updateNotice = MutableStateFlow<UpdateNotice?>(null)
+    val updateNotice: StateFlow<UpdateNotice?> = _updateNotice.asStateFlow()
     private val announcedReleases = mutableSetOf<String>()
     private var lastManualRefresh = 0L
 
@@ -48,7 +50,10 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                 _apps.value = it
                 _selfUpdate.value = repository.latestSelfUpdate
                 val updates = pendingUpdates().filter { app -> announcedReleases.add("${app.owner}/${app.repo}:${app.releaseId}") }
-                if (updates.isNotEmpty()) _updateNotice.value = if (updates.size == 1) "${updates.single().name} has an update available" else "${updates.size} updates are available"
+                if (updates.isNotEmpty()) {
+                    val app = updates.first()
+                    _updateNotice.value = UpdateNotice(app, if (updates.size == 1) "${app.name} update available" else "${updates.size} updates available")
+                }
             }.onFailure { _error.value = it.message ?: "Could not connect to GitHub" }
             _rateLimit.value = repository.rateLimitStatus
             _loading.value = false
@@ -71,6 +76,7 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadProgress.value = _downloadProgress.value + (app.repo to progress)
                 }
             }.onSuccess {
+                repository.recordInstalled(app)
                 _failedDownloads.value = _failedDownloads.value - app.repo
                 onReady(it)
             }.onFailure {
@@ -86,6 +92,7 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                 _downloadProgress.value = _downloadProgress.value + (app.repo to progress)
             }
         }.onSuccess {
+            repository.recordInstalled(app)
             _failedDownloads.value = _failedDownloads.value - app.repo
             return it
         }.onFailure {

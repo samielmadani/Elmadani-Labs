@@ -24,6 +24,7 @@ object NotificationHelper {
         val pendingIntent = PendingIntent.getActivity(context, app.repo.hashCode(), detailIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(android.graphics.Color.WHITE)
             .setContentTitle("${app.name} has an update")
             .setContentText("${app.version} is ready to install")
             .setAutoCancel(true)
