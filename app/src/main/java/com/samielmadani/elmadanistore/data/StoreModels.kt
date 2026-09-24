@@ -3,6 +3,7 @@ package com.samielmadani.elmadanistore.data
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
  data class StoreApp(
     val owner: String,
@@ -29,6 +30,13 @@ import java.time.format.DateTimeFormatter
     val hasUpdate get() = isInstalled && (releaseVersionCode?.let { installedVersionCode?.let { installed -> it > installed } } ?: (version != installedVersion))
     val needsInstall get() = !isInstalled || hasUpdate
     val formattedSize get() = if (assetSize < 1_048_576) "${assetSize / 1024} KB" else "%.1f MB".format(assetSize / 1_048_576f)
+    val lastUpdatedText: String get() = runCatching {
+        DateTimeFormatter.ofPattern("MMM d, yyyy").withZone(ZoneId.systemDefault()).format(Instant.parse(publishedAt))
+    }.getOrDefault(publishedAt.take(10))
+    val isNew: Boolean get() = runCatching {
+        val published = Instant.parse(publishedAt).toEpochMilli()
+        System.currentTimeMillis() - published <= TimeUnit.DAYS.toMillis(14)
+    }.getOrDefault(false)
 }
 
 data class RateLimitStatus(

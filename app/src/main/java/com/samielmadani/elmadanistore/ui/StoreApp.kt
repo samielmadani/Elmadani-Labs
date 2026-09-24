@@ -1,6 +1,10 @@
 package com.samielmadani.elmadanistore.ui
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -9,17 +13,18 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,27 +41,29 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
@@ -64,7 +71,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -74,10 +80,11 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -89,24 +96,28 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import kotlinx.coroutines.launch
+import com.samielmadani.elmadanistore.CrashReporter
 import com.samielmadani.elmadanistore.data.SortMode
 import com.samielmadani.elmadanistore.data.StoreApp
 import com.samielmadani.elmadanistore.data.ThemeMode
 import com.samielmadani.elmadanistore.ui.theme.ThemeSettings
+import kotlinx.coroutines.launch
 
-private enum class TopLevelPage { Apps, Websites, Settings }
+private enum class TopLevelPage { Apps, Settings }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewModel()) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { TopLevelPage.entries.size })
     var selectedPage by remember { mutableIntStateOf(0) }
@@ -115,9 +126,54 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
     val loading by storeViewModel.loading.collectAsState()
     val error by storeViewModel.error.collectAsState()
     val progress by storeViewModel.downloadProgress.collectAsState()
+    val failedDownloads by storeViewModel.failedDownloads.collectAsState()
     val updateNotice by storeViewModel.updateNotice.collectAsState()
+    val selfUpdate by storeViewModel.selfUpdate.collectAsState()
+    val pendingUpdates = storeViewModel.pendingUpdates()
     val snackbarHostState = remember { SnackbarHostState() }
     val sortSheetOpen = remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val prefs = remember { context.getSharedPreferences("store", Context.MODE_PRIVATE) }
+    var onboardingDone by rememberSaveable { mutableStateOf(prefs.getBoolean("onboarding_done", false)) }
+    var pendingInstallMessage by remember { mutableStateOf<String?>(null) }
+    var showCrashDialog by remember { mutableStateOf(CrashReporter.read(context) != null) }
+    var crashLog by remember { mutableStateOf(CrashReporter.read(context)) }
+
+    fun openUnknownSources() {
+        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+        context.startActivity(intent)
+    }
+
+    fun handleInstall(app: StoreApp) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            pendingInstallMessage = "Install is blocked because this app is not allowed to install apps from outside the Play Store. Open Settings to allow it once, then try again."
+            return
+        }
+        storeViewModel.download(app) { file ->
+            context.startActivity(storeViewModel.install(file))
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
+
+    fun handleUpdateAll() = scope.launch {
+        val updates = storeViewModel.pendingUpdates()
+        if (updates.isEmpty()) return@launch
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            pendingInstallMessage = "Install is blocked because this app is not allowed to install apps from outside the Play Store. Open Settings to allow it once, then try again."
+            return@launch
+        }
+        updates.forEach { app ->
+            val file = storeViewModel.downloadFile(app) ?: run {
+                snackbarHostState.showSnackbar("Download failed — tap to retry")
+                return@launch
+            }
+            context.startActivity(storeViewModel.install(file))
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        snackbarHostState.showSnackbar("All updates finished.")
+    }
+
     LaunchedEffect(apps, initialRepo) {
         initialRepo?.let { repo -> apps.firstOrNull { it.repo.equals(repo, true) }?.let { selectedApp = it } }
     }
@@ -130,55 +186,157 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
             storeViewModel.dismissUpdateNotice()
         }
     }
-    BackHandler(enabled = selectedApp != null || sortSheetOpen.value || selectedPage != 0) {
+    BackHandler(enabled = selectedApp != null || sortSheetOpen.value || selectedPage != 0 || !onboardingDone) {
         when {
             selectedApp != null -> selectedApp = null
             sortSheetOpen.value -> sortSheetOpen.value = false
+            !onboardingDone -> onboardingDone = true
             else -> scope.launch { pagerState.animateScrollToPage(0) }
         }
     }
+
+    if (!onboardingDone) {
+        OnboardingScreen(onComplete = {
+            onboardingDone = true
+            prefs.edit().putBoolean("onboarding_done", true).apply()
+        }, onSkip = {
+            onboardingDone = true
+            prefs.edit().putBoolean("onboarding_done", true).apply()
+        })
+        return
+    }
+
     Scaffold(bottomBar = {
         NavigationBar {
-            NavigationBarItem(selected = selectedPage == TopLevelPage.Apps.ordinal, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } }, icon = { Icon(Icons.Default.CloudDownload, null) }, label = { Text("Apps") })
-            NavigationBarItem(selected = selectedPage == TopLevelPage.Websites.ordinal, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } }, icon = { Icon(Icons.Default.Language, null) }, label = { Text("Websites") })
-            NavigationBarItem(selected = selectedPage == TopLevelPage.Settings.ordinal, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
+            NavigationBarItem(
+                selected = selectedPage == TopLevelPage.Apps.ordinal,
+                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } },
+                icon = {
+                    BadgedBox(badge = { if (pendingUpdates.size > 0) Badge { Text(pendingUpdates.size.toString()) } }) {
+                        Icon(Icons.Default.CloudDownload, null)
+                    }
+                },
+                label = { Text("Apps") }
+            )
+            NavigationBarItem(
+                selected = selectedPage == TopLevelPage.Settings.ordinal,
+                onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } },
+                icon = {
+                    BadgedBox(badge = { if (pendingUpdates.size > 0) Badge { Text(pendingUpdates.size.toString()) } }) {
+                        Icon(Icons.Default.Settings, null)
+                    }
+                },
+                label = { Text("Settings") }
+            )
         }
     }) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                 when (TopLevelPage.entries[page]) {
-                    TopLevelPage.Apps -> HomePage(apps, loading, error, progress, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value) { sortSheetOpen.value = false }
-                    TopLevelPage.Websites -> WebsitesPage()
-                    TopLevelPage.Settings -> SettingsPage(storeViewModel)
+                    TopLevelPage.Apps -> HomePage(apps, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
+                    TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
                 }
             }
             SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
         }
     }
+
+    if (pendingInstallMessage != null) {
+        AlertDialog(
+            onDismissRequest = { pendingInstallMessage = null },
+            title = { Text("Install blocked") },
+            text = { Text(pendingInstallMessage!!) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingInstallMessage = null
+                    openUnknownSources()
+                }) { Text("Open Settings") }
+            },
+            dismissButton = { TextButton(onClick = { pendingInstallMessage = null }) { Text("Close") } }
+        )
+    }
+
+    if (showCrashDialog && crashLog != null) {
+        AlertDialog(
+            onDismissRequest = { showCrashDialog = false; CrashReporter.clear(context) },
+            title = { Text("App crash report") },
+            text = { Text("A crash was detected. You can email the saved error details to Sami. Nothing else is included.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val intent = CrashReporter.emailIntent(context)
+                    context.startActivity(intent)
+                    CrashReporter.clear(context)
+                    showCrashDialog = false
+                }) { Text("Send report") }
+            },
+            dismissButton = { TextButton(onClick = { CrashReporter.clear(context); showCrashDialog = false }) { Text("Dismiss") } }
+        )
+    }
+
     selectedApp?.let { app ->
-        DetailPage(app, progress[app.repo], storeViewModel) { selectedApp = null }
+        DetailPage(app, progress[app.repo], failedDownloads.contains(app.repo), storeViewModel, { selectedApp = null }, { handleInstall(app) }, { handleInstall(app) })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomePage(apps: List<StoreApp>, loading: Boolean, error: String?, progress: Map<String, Int>, vm: StoreViewModel, openDetails: (StoreApp) -> Unit, openSort: () -> Unit, sortSheetOpen: Boolean, closeSort: () -> Unit) {
-    val context = LocalContext.current
+private fun HomePage(
+    apps: List<StoreApp>,
+    loading: Boolean,
+    error: String?,
+    progress: Map<String, Int>,
+    failedDownloads: Set<String>,
+    pendingUpdates: List<StoreApp>,
+    vm: StoreViewModel,
+    openDetails: (StoreApp) -> Unit,
+    openSort: () -> Unit,
+    sortSheetOpen: Boolean,
+    closeSort: () -> Unit,
+    install: (StoreApp) -> Unit,
+    retry: (StoreApp) -> Unit,
+    updateAll: () -> Unit
+) {
     var sort by remember { mutableStateOf(SortMode.UPDATED) }
-    val shownApps = vm.sorted(sort)
+    var search by rememberSaveable { mutableStateOf("") }
+    val shownApps = vm.sorted(sort).filter { app ->
+        val needle = search.trim()
+        if (needle.isBlank()) true else app.name.contains(needle, ignoreCase = true) || app.description.contains(needle, ignoreCase = true)
+    }
+    val totalUpdates = pendingUpdates.size
+
     Scaffold(topBar = {
-        TopAppBar(title = { Column { Text("Elmadani Store", fontWeight = FontWeight.Bold); Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }, actions = {
-            IconButton(onClick = openSort) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") }
-        })
+        TopAppBar(
+            title = { Column { Text("Elmadani Store", fontWeight = FontWeight.Bold); Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+            actions = { IconButton(onClick = openSort) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") } }
+        )
     }) { padding ->
         PullToRefreshBox(isRefreshing = loading, onRefresh = vm::refresh, state = rememberPullToRefreshState(), modifier = Modifier.padding(padding).fillMaxSize()) {
             when {
                 loading && apps.isEmpty() -> LoadingList()
-                error != null && apps.isEmpty() -> EmptyState("Could not load apps", error ?: "Try again", Icons.Default.Refresh, vm::refresh)
-                apps.isEmpty() -> EmptyState("No releases yet", "Public repositories with APK releases will appear here.", Icons.Default.CloudDownload, vm::refresh)
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
-                    item { Text("Available apps", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("Install directly from GitHub Releases", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    items(shownApps, key = { it.repo }) { app -> AppCard(app, progress[app.repo], { openDetails(app) }) { vm.download(app) { file -> context.startActivity(vm.install(file)) } } }
+                error != null && apps.isEmpty() -> EmptyState("Could not load apps", error ?: "Try again", Icons.Default.CloudDownload, vm::refresh)
+                apps.isEmpty() -> EmptyState("No apps yet", "New updates will appear here.", Icons.Default.CloudDownload, vm::refresh)
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(20.dp)) {
+                    item {
+                        Text("${apps.size} apps, ${totalUpdates} updates available.", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        if (totalUpdates >= 2) {
+                            Button(onClick = updateAll, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) {
+                                Text("Update all ($totalUpdates)")
+                            }
+                        }
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = search,
+                            onValueChange = { search = it },
+                            placeholder = { Text("Search apps") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            singleLine = true
+                        )
+                    }
+                    items(shownApps, key = { it.repo }) { app ->
+                        AppCard(app, progress[app.repo], failedDownloads.contains(app.repo), { openDetails(app) }, { install(app) }, { retry(app) })
+                    }
                 }
             }
         }
@@ -197,7 +355,7 @@ private fun HomePage(apps: List<StoreApp>, loading: Boolean, error: String?, pro
 }
 
 @Composable
-private fun AppCard(app: StoreApp, progress: Int?, openDetails: () -> Unit, install: () -> Unit) {
+private fun AppCard(app: StoreApp, progress: Int?, failed: Boolean, openDetails: () -> Unit, install: () -> Unit, retry: () -> Unit) {
     val isInstalling = progress != null && progress < 100
     val accentColor = when {
         isInstalling -> MaterialTheme.colorScheme.tertiary
@@ -211,52 +369,93 @@ private fun AppCard(app: StoreApp, progress: Int?, openDetails: () -> Unit, inst
         app.isInstalled -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f)
         else -> MaterialTheme.colorScheme.surface
     }
+    val actionLabel = when {
+        failed -> "Retry"
+        app.hasUpdate -> "Update"
+        app.isInstalled -> "Up to date"
+        else -> "Install"
+    }
 
     Card(
         shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
         colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
         modifier = Modifier.fillMaxWidth().clickable(onClick = openDetails)
     ) {
         Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(model = app.iconUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(58.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
-                Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) { Text(app.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold); Text(app.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(app.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (app.isNew) { AssistChip(onClick = {}, label = { Text("New") }, enabled = false, modifier = Modifier.height(28.dp), colors = AssistChipDefaults.assistChipColors(disabledContainerColor = MaterialTheme.colorScheme.primaryContainer, disabledLabelColor = MaterialTheme.colorScheme.onPrimaryContainer)) }
+                    }
+                    Text(app.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                }
             }
-            Spacer(Modifier.height(16.dp)); Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(app.version, fontWeight = FontWeight.Medium); Text("  •  ${app.formattedSize}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.weight(1f));
-                StatusChip(app, isInstalling)
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(app.version, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(8.dp))
-                if (isInstalling) {
-                    CircularProgressIndicator(progress = { progress / 100f }, modifier = Modifier.size(26.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.tertiary)
+                Text("Updated ${app.lastUpdatedText}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.weight(1f))
+                StatusChip(app, isInstalling, failed)
+            }
+            Spacer(Modifier.height(10.dp))
+            if (isInstalling) {
+                LinearProgressIndicator(progress = { (progress ?: 0) / 100f }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.tertiary, trackColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.38f))
+            } else if (failed) {
+                Text("Download failed — tap to retry", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                if (failed) {
+                    Button(onClick = retry, shape = RoundedCornerShape(percent = 50), modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(actionLabel) }
+                } else if (isInstalling) {
+                    CircularProgressIndicator(progress = { (progress ?: 0) / 100f }, modifier = Modifier.size(26.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.tertiary)
                 } else {
                     AppActionButton(app, onClick = install)
                 }
             }
-            if (isInstalling) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.tertiary, trackColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.38f)) }
         }
     }
 }
 
 @Composable
-private fun StatusChip(app: StoreApp, isInstalling: Boolean = false) {
-    val (container, label, icon) = when {
-        isInstalling -> Triple(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
-        app.hasUpdate -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, MaterialTheme.colorScheme.onErrorContainer)
-        app.isInstalled -> Triple(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-        else -> Triple(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+private fun StatusChip(app: StoreApp, isInstalling: Boolean = false, failed: Boolean = false) {
+    val text = when {
+        failed -> "Failed"
+        isInstalling -> "Installing"
+        app.hasUpdate -> "Update available"
+        app.isInstalled -> "Up to date"
+        else -> "Ready"
+    }
+    val container = when {
+        failed -> MaterialTheme.colorScheme.errorContainer
+        isInstalling -> MaterialTheme.colorScheme.tertiaryContainer
+        app.hasUpdate -> MaterialTheme.colorScheme.errorContainer
+        app.isInstalled -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer
+    }
+    val labelColor = when {
+        failed -> MaterialTheme.colorScheme.onErrorContainer
+        isInstalling -> MaterialTheme.colorScheme.onTertiaryContainer
+        app.hasUpdate -> MaterialTheme.colorScheme.onErrorContainer
+        app.isInstalled -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSecondaryContainer
     }
 
     AssistChip(
         onClick = {},
         enabled = false,
-        label = { Text(if (isInstalling) "Installing" else if (app.hasUpdate) "Update available" else if (app.isInstalled) "Up to date" else "Ready") },
+        label = { Text(text) },
         leadingIcon = { Icon(Icons.Default.CheckCircle, null) },
         colors = AssistChipDefaults.assistChipColors(
             disabledContainerColor = container,
-            disabledLabelColor = label,
-            disabledLeadingIconContentColor = icon
+            disabledLabelColor = labelColor,
+            disabledLeadingIconContentColor = labelColor
         ),
         modifier = Modifier.height(32.dp)
     )
@@ -277,11 +476,9 @@ private fun AppActionButton(app: StoreApp, onClick: () -> Unit) {
                 disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f),
                 disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f)
             ),
-            modifier = Modifier.height(40.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
-        ) {
-            Text(label)
-        }
+            modifier = Modifier.heightIn(min = 48.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) { Text(label) }
         else -> FilledTonalButton(
             onClick = {},
             enabled = false,
@@ -292,31 +489,70 @@ private fun AppActionButton(app: StoreApp, onClick: () -> Unit) {
                 disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                 disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             ),
-            modifier = Modifier.height(40.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
-        ) {
-            Text(label)
-        }
+            modifier = Modifier.heightIn(min = 48.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) { Text(label) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DetailPage(app: StoreApp, progress: Int?, vm: StoreViewModel, back: () -> Unit) {
+private fun DetailPage(app: StoreApp, progress: Int?, failed: Boolean, vm: StoreViewModel, back: () -> Unit, install: () -> Unit, retry: () -> Unit) {
     val context = LocalContext.current
     var advanced by remember { mutableStateOf(false) }
     var customName by remember { mutableStateOf(vm.overrideName(app.repo).orEmpty()) }
     ModalBottomSheet(onDismissRequest = back, sheetState = rememberModalBottomSheetState()) {
         Scaffold(topBar = { TopAppBar(title = { Text(app.name) }, navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { padding ->
-            LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.padding(padding)) {
-            item { Row(verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(82.dp).clip(RoundedCornerShape(22.dp))); Spacer(Modifier.width(18.dp)); Column { Text(app.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("Latest ${app.version}", color = MaterialTheme.colorScheme.primary); Text(app.formattedSize, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
-            item { Button(onClick = { vm.download(app) { file -> context.startActivity(vm.install(file)) } }, enabled = !app.isInstalled || app.hasUpdate, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(percent = 50), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Icon(Icons.Default.CloudDownload, null); Spacer(Modifier.width(8.dp)); Text(if (app.hasUpdate) "Update app" else if (app.isInstalled) "Up to date" else "Install app") } }
-            if (progress != null && progress < 100) item { LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth()) }
-            item { Section("About this app") { Text(app.description, style = MaterialTheme.typography.bodyLarge) } }
-            item { Section("Release notes") { Text(app.releaseNotes.ifBlank { "No release notes provided." }, style = MaterialTheme.typography.bodyMedium) } }
-            item { Section("Version history") { app.releases.forEach { release -> Text("${release.version}  •  ${release.formattedDate}", fontWeight = FontWeight.Medium); Text(release.assetName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
-            item { Section("Personalize") { OutlinedTextField(customName, { customName = it }, label = { Text("Display name override") }, modifier = Modifier.fillMaxWidth(), singleLine = true); TextButton(onClick = { vm.saveOverrideName(app.repo, customName) }) { Text("Save name") } } }
-            item { Card(shape = RoundedCornerShape(18.dp)) { Column(Modifier.padding(16.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Text("Advanced", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); Spacer(Modifier.weight(1f)); TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide" else "Show") } }; AnimatedVisibility(advanced) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("Repository: ${app.owner}/${app.repo}", style = MaterialTheme.typography.bodySmall); Text("APK asset: ${app.assetName}", style = MaterialTheme.typography.bodySmall); Text("Pre-release: ${if (app.prerelease) "Yes" else "No"}", style = MaterialTheme.typography.bodySmall); OutlinedButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(app.repositoryUrl))) }) { Text("View release on GitHub") } } } } } }
+            LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.padding(padding)) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(model = app.iconUrl, contentDescription = null, modifier = Modifier.size(82.dp).clip(RoundedCornerShape(22.dp)))
+                        Spacer(Modifier.width(18.dp))
+                        Column {
+                            Text(app.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            Text("Latest ${app.version}", color = MaterialTheme.colorScheme.primary)
+                            Text("Updated ${app.lastUpdatedText}  •  ${app.formattedSize}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                item {
+                    Button(
+                        onClick = { if (failed) retry() else install() },
+                        enabled = !app.isInstalled || app.hasUpdate || failed,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(percent = 50),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
+                    ) {
+                        Icon(Icons.Default.CloudDownload, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (failed) "Retry download" else if (app.hasUpdate) "Update app" else if (app.isInstalled) "Up to date" else "Install app")
+                    }
+                }
+                if (progress != null && progress < 100) item { LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth()) }
+                if (failed) item { Text("Download failed — tap to retry", color = MaterialTheme.colorScheme.error) }
+                item { Section("About this app") { Text(app.description, style = MaterialTheme.typography.bodyLarge) } }
+                item { Section("Update notes") { Text(app.releaseNotes.ifBlank { "No update notes provided." }, style = MaterialTheme.typography.bodyMedium) } }
+                item { Section("Version history") { app.releases.forEach { release -> Text("${release.version}  •  ${release.formattedDate}", fontWeight = FontWeight.Medium); Text(release.assetName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+                item { Section("Personalize") { OutlinedTextField(customName, { customName = it }, label = { Text("Display name override") }, modifier = Modifier.fillMaxWidth(), singleLine = true); TextButton(onClick = { vm.saveOverrideName(app.repo, customName) }) { Text("Save name") } } }
+                item {
+                    Card(shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Advanced", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide" else "Show") }
+                            }
+                            AnimatedVisibility(advanced) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("Repository: ${app.owner}/${app.repo}", style = MaterialTheme.typography.bodySmall)
+                                    Text("App asset: ${app.assetName}", style = MaterialTheme.typography.bodySmall)
+                                    Text("Pre-release: ${if (app.prerelease) "Yes" else "No"}", style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.repositoryUrl))) }) { Text("View update on GitHub") }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -324,22 +560,45 @@ private fun DetailPage(app: StoreApp, progress: Int?, vm: StoreViewModel, back: 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsPage(vm: StoreViewModel) {
+private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings: () -> Unit) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(false) }
     var ignoredRepos by remember { mutableStateOf(vm.ignoredRepos().joinToString("\n")) }
     var ignoredSaved by remember { mutableStateOf(false) }
     val rateLimit by vm.rateLimit.collectAsState()
+    val feedbackSubject = Uri.encode("Elmadani Store feedback")
+    val feedbackBody = Uri.encode("I'd like to share feedback about Elmadani Store.\n\nApp version: ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}\nAndroid: ${Build.VERSION.RELEASE}\n")
+
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { padding ->
         Column(Modifier.padding(padding).padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            Text("GitHub access", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f))) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("About Elmadani Store", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Built by Sami Elmadani, a software engineer based in Christchurch, New Zealand.", style = MaterialTheme.typography.bodyMedium)
+                    Text("This app is not on the Play Store because it installs and updates apps directly from trusted GitHub releases outside the Play Store rules.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Last updated: ${selfUpdate?.lastUpdatedText ?: "Unknown"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(
+                        onClick = { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:hello@samielmadani.dev?subject=$feedbackSubject&body=$feedbackBody"))) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(percent = 50)
+                    ) { Text("Send feedback") }
+                }
+            }
+            Text("FAQ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            FAQItem("Is this safe?", "Yes. This app only fetches public app details and updates from GitHub. It never uploads your personal data or auto-sends crash reports without your confirmation.")
+            FAQItem("Why allow unknown sources?", "Some apps are distributed outside the Play Store. Android asks you to allow that for this app once so it can install the app packages you choose.")
+            FAQItem("How do I uninstall an app?", "Open Android Settings, tap Apps, choose the app, then tap Uninstall. You can also remove it from the app list after it is installed.")
+            FAQItem("How do I stop update notifications?", "Turn off update checks or ignore a specific app in the app list. You can also pause background checks in Android settings if needed.")
+
+            Text("Advanced", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("GitHub access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("A personal access token increases API limits and enables private repositories. It is stored only on this device.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(token, { token = it; saved = false }, modifier = Modifier.fillMaxWidth(), label = { Text("Personal access token") }, singleLine = true)
             Button(onClick = { vm.saveToken(token); saved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text(if (saved) "Saved" else "Save token") }
-            Text("API status", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("API status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("${rateLimit.remaining?.toString() ?: "Unknown"} requests remaining${rateLimit.limit?.let { " of $it" } ?: ""}. Reset: ${rateLimit.resetText}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Ignored repositories", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("Ignored repositories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("One owner/repo per line. Ignored repositories are never fetched or shown.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(ignoredRepos, { ignoredRepos = it; ignoredSaved = false }, modifier = Modifier.fillMaxWidth(), label = { Text("owner/repo") }, minLines = 2)
             FilledTonalButton(onClick = { vm.saveIgnoredRepos(ignoredRepos); ignoredSaved = true; vm.refresh() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Text(if (ignoredSaved) "Ignored list saved" else "Save ignored list") }
@@ -349,19 +608,20 @@ private fun SettingsPage(vm: StoreViewModel) {
             Text("Accent", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) { listOf(Color(0xFF315F90), Color(0xFF006B5E), Color(0xFF8B4A60), Color(0xFF745900)).forEach { color -> Box(Modifier.size(34.dp).clip(CircleShape).background(color).clickable { ThemeSettings.setAccent(color) }) } }
             Text("Storage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            OutlinedButton(onClick = vm::clearDownloads, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(8.dp)); Text("Clear cached APKs") }
-            TextButton(onClick = { context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "Elmadani Store debug export\nPackage: ${context.packageName}\nAndroid: ${android.os.Build.VERSION.RELEASE}"), "Export logs")) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Export debug logs") }
-            Text("Updates are checked when the store refreshes. Background checks will notify you when a newer release is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = vm::clearDownloads, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(8.dp)); Text("Clear cached app files") }
+            Button(onClick = openSettings, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Text("Open install settings") }
+            TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Elmadani Store debug export\nPackage: ${context.packageName}\nAndroid: ${Build.VERSION.RELEASE}"), "Export logs")) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Export debug logs") }
+            Text("Updates are checked when Elmadani Store refreshes. Background checks will notify you when a newer update is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WebsitesPage() {
-    Scaffold(topBar = { TopAppBar(title = { Text("Websites") }) }) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            EmptyState("No websites added yet", "Websites by Sami will appear here.", Icons.Default.Language, null)
+private fun FAQItem(question: String, answer: String) {
+    Card(shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(question, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(answer, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -370,8 +630,54 @@ private fun WebsitesPage() {
 private fun Section(title: String, content: @Composable () -> Unit) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold); content() } }
 
 @Composable
+private fun OnboardingScreen(onComplete: () -> Unit, onSkip: () -> Unit) {
+    val pages = listOf(
+        "Elmadani Store helps you find apps and keep them updated from trusted GitHub releases.",
+        "Some apps are outside the Play Store, so Android may ask you to allow installation from this app once. That is expected and safe when you choose the app.",
+        "You remain in control: you can review updates, install only what you want, and check your settings anytime."
+    )
+    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onSkip) { Text("Skip") }
+            }
+            HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Info, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(20.dp))
+                    Text("Welcome", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    Text(pages[page], style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                repeat(pages.size) { index ->
+                    val color = if (pagerState.currentPage == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    Box(Modifier.size(if (pagerState.currentPage == index) 12.dp else 8.dp).background(color, CircleShape))
+                    if (index < pages.size - 1) Spacer(Modifier.width(8.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        if (pagerState.currentPage < pages.lastIndex) {
+                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                        } else {
+                            onComplete()
+                        }
+                    },
+                    shape = RoundedCornerShape(percent = 50),
+                    modifier = Modifier.height(48.dp)
+                ) { Text(if (pagerState.currentPage < pages.lastIndex) "Next" else "Get started") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LoadingList() {
-    LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(4) { AppSkeletonCard() }
     }
 }
@@ -433,5 +739,16 @@ private fun Skeleton(modifier: Modifier = Modifier, shape: Shape = RoundedCorner
 }
 
 @Composable
-private fun EmptyState(title: String, message: String, icon: androidx.compose.ui.graphics.vector.ImageVector, retry: (() -> Unit)?) { Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(icon, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary); Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant); retry?.let { Button(onClick = it, shape = RoundedCornerShape(percent = 50), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text("Try again") } } } } }
+private fun EmptyState(title: String, message: String, icon: androidx.compose.ui.graphics.vector.ImageVector, retry: (() -> Unit)?) {
+    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(icon, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            retry?.let {
+                Button(onClick = it, shape = RoundedCornerShape(percent = 50), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text("Try again") }
+            }
+        }
+    }
+}
 
