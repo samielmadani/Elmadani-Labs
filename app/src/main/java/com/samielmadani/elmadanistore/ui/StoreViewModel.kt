@@ -43,7 +43,7 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
             repository.trackedApps().collectLatest { trackedApps ->
                 val trackedByRepo = trackedApps.associateBy { it.repo.lowercase() }
                 _apps.value = _apps.value.map { app ->
-                    trackedByRepo["${app.owner}/${app.repo}".lowercase()]?.let { tracked ->
+                    trackedByRepo[app.repo.lowercase()]?.let { tracked ->
                         app.copy(
                             installedVersion = tracked.installedVersionName,
                             installedVersionCode = tracked.installedVersionCode,
@@ -52,7 +52,7 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                     } ?: app
                 }
                 _selfUpdate.value = _selfUpdate.value?.let { app ->
-                    trackedByRepo["${app.owner}/${app.repo}".lowercase()]?.let { tracked ->
+                    trackedByRepo[app.repo.lowercase()]?.let { tracked ->
                         app.copy(
                             installedVersion = tracked.installedVersionName,
                             installedVersionCode = tracked.installedVersionCode,

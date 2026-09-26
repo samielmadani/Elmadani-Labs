@@ -27,7 +27,17 @@ import java.util.concurrent.TimeUnit
     val releases: List<ReleaseSummary> = emptyList()
 ) {
     val isInstalled get() = installedVersion != null || installedVersionCode != null
-    val hasUpdate get() = isInstalled && (releaseVersionCode?.let { installedVersionCode?.let { installed -> it > installed } } ?: (version != installedVersion))
+    val hasUpdate: Boolean
+        get() {
+            if (!isInstalled) return false
+            if (owner.equals("samielmadani", true) && repo.equals("Elmadani-Studio", true)) {
+                android.util.Log.d("SelfUpdate", "Comparing current=${installedVersion ?: "unknown"} (code=${installedVersionCode ?: "unknown"}) with latest=$version (code=${releaseVersionCode ?: "unknown"})")
+            }
+            val comparison = releaseVersionCode?.let { latest -> installedVersionCode?.let(latest::compareTo) }
+                ?: compareVersionNames(version, installedVersion ?: return false)
+                ?: return false
+            return comparison > 0
+        }
     val needsInstall get() = !isInstalled || hasUpdate
     val formattedSize get() = if (assetSize < 1_048_576) "${assetSize / 1024} KB" else "%.1f MB".format(assetSize / 1_048_576f)
     val lastUpdatedText: String get() = runCatching {
@@ -37,6 +47,21 @@ import java.util.concurrent.TimeUnit
         val published = Instant.parse(publishedAt).toEpochMilli()
         System.currentTimeMillis() - published <= TimeUnit.DAYS.toMillis(14)
     }.getOrDefault(false)
+}
+
+private fun compareVersionNames(latest: String, installed: String): Int? {
+    val pattern = Regex("^[vV]?(\\d+(?:\\.\\d+)*)(?:[-+].*)?$")
+    val latestParts = pattern.matchEntire(latest.trim())?.groupValues?.get(1)?.split('.')?.map(String::toLongOrNull) ?: return null
+    val installedParts = pattern.matchEntire(installed.trim())?.groupValues?.get(1)?.split('.')?.map(String::toLongOrNull) ?: return null
+    if (latestParts.any { it == null } || installedParts.any { it == null }) return null
+    val length = maxOf(latestParts.size, installedParts.size)
+    for (index in 0 until length) {
+        val latestPart = latestParts.getOrElse(index) { 0L } ?: return null
+        val installedPart = installedParts.getOrElse(index) { 0L } ?: return null
+        val comparison = latestPart.compareTo(installedPart)
+        if (comparison != 0) return comparison
+    }
+    return 0
 }
 
 data class RateLimitStatus(

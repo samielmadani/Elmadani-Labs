@@ -80,7 +80,7 @@ class StoreRepository(private val context: Context) {
             val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk", true) } ?: return null
             val metadata = loadMetadata(owner, name, assets)
             val packageName = metadata?.optString("packageName").orEmpty().ifBlank { null }
-            val releaseVersionCode = metadata?.optLong("versionCode")?.takeIf { it > 0L }
+            val releaseVersionCode = releaseVersionCode(release, metadata)
             val history = getJsonArray("https://api.github.com/repos/$owner/$name/releases?per_page=20")?.let { releases ->
                 (0 until releases.length()).mapNotNull { index ->
                     val item = releases.optJSONObject(index) ?: return@mapNotNull null
@@ -96,7 +96,8 @@ class StoreRepository(private val context: Context) {
             val app = StoreApp(owner = owner, repo = name, name = displayName, description = description, iconUrl = iconFor(owner, name), repositoryUrl = "https://github.com/$owner/$name", releaseId = release.optLong("id"), version = release.optString("tag_name"), releaseNotes = release.optString("body"), publishedAt = release.optString("published_at"), assetName = apk.optString("name"), assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"), prerelease = release.optBoolean("prerelease"), packageName = packageName, releaseVersionCode = releaseVersionCode, releases = history)
             val tracked = trackingStore.recordLatest(app)
             val reconciled = trackingStore.reconcileInstalled(app)
-            return app.copy(installedVersion = reconciled?.installedVersionName ?: tracked.installedVersionName, installedVersionCode = reconciled?.installedVersionCode ?: tracked.installedVersionCode)
+            val installState = reconciled ?: tracked
+            return app.copy(installedVersion = installState.installedVersionName, installedVersionCode = installState.installedVersionCode)
         } finally {
             Log.d(TAG, "Repo refresh finished: $owner/$name in ${elapsedMillis(startedAt)} ms")
         }
@@ -118,13 +119,11 @@ class StoreRepository(private val context: Context) {
             publishedAt = release.optString("published_at"), assetName = apk.optString("name"),
             assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"),
             prerelease = release.optBoolean("prerelease"), packageName = context.packageName,
+            releaseVersionCode = releaseVersionCode(release),
             installedVersion = packageInfo?.versionName, installedVersionCode = installedCode
         )
-        val tracked = trackingStore.recordLatest(app)
-        return app.copy(
-            installedVersion = tracked.installedVersionName ?: app.installedVersion,
-            installedVersionCode = tracked.installedVersionCode ?: app.installedVersionCode
-        )
+        trackingStore.recordLatest(app)
+        return app
     }
 
     suspend fun download(app: StoreApp, onProgress: (Int) -> Unit): File = withContext(Dispatchers.IO) {
@@ -233,6 +232,11 @@ class StoreRepository(private val context: Context) {
         }?.let { return it }
         return assets.metadataAsset()?.let { getJson(it.optString("browser_download_url")) }
     }
+
+    private fun releaseVersionCode(release: JSONObject, metadata: JSONObject? = null): Long? =
+        metadata?.optLong("versionCode")?.takeIf { it > 0L }
+            ?: Regex("(?i)\\bversion\\s*code\\s*:\\s*`?(\\d+)").find(release.optString("body"))
+                ?.groupValues?.get(1)?.toLongOrNull()?.takeIf { it > 0L }
 
     suspend fun recordInstalled(app: StoreApp): TrackedAppEntity? = trackingStore.markInstalled(app)
     fun trackedApps(): Flow<List<TrackedAppEntity>> = trackingStore.flow()

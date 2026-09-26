@@ -475,10 +475,10 @@ private fun AppCard(app: StoreApp, progress: Int?, failed: Boolean, openDetails:
         border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
         modifier = Modifier.fillMaxWidth().clickable(onClick = openDetails)
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(model = app.iconUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(58.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
-                Spacer(Modifier.width(14.dp))
+                AsyncImage(model = app.iconUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(app.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -487,7 +487,7 @@ private fun AppCard(app: StoreApp, progress: Int?, failed: Boolean, openDetails:
                     Text(app.description, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(app.version, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(8.dp))
@@ -495,16 +495,16 @@ private fun AppCard(app: StoreApp, progress: Int?, failed: Boolean, openDetails:
                 Spacer(Modifier.weight(1f))
                 StatusChip(app, isInstalling, failed)
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             if (isInstalling) {
                 LinearProgressIndicator(progress = { (progress ?: 0) / 100f }, modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.tertiary, trackColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.38f))
             } else if (failed) {
                 Text("Download failed — tap to retry", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 if (failed) {
-                    Button(onClick = retry, shape = RoundedCornerShape(percent = 50), modifier = Modifier.heightIn(min = 48.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(actionLabel) }
+                    Button(onClick = retry, shape = RoundedCornerShape(percent = 50), modifier = Modifier.heightIn(min = 40.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(actionLabel) }
                 } else if (isInstalling) {
                     CircularProgressIndicator(progress = { (progress ?: 0) / 100f }, modifier = Modifier.size(26.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.tertiary)
                 } else {
