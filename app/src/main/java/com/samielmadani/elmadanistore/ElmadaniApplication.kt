@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore
+package com.samielmadani.elmadanistudio
 
 import android.app.Application
 import android.util.Log

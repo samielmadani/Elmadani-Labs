@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.data
+package com.samielmadani.elmadanistudio.data
 
 import android.content.BroadcastReceiver
 import android.content.Context

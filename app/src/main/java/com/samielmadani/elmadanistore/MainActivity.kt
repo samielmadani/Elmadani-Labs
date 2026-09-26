@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore
+package com.samielmadani.elmadanistudio
 
 import android.os.Bundle
 import android.Manifest
@@ -10,10 +10,10 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.samielmadani.elmadanistore.ui.StoreApp
-import com.samielmadani.elmadanistore.ui.theme.ElmadaniStoreTheme
-import com.samielmadani.elmadanistore.ui.theme.ThemeSettings
-import com.samielmadani.elmadanistore.worker.UpdateScheduler
+import com.samielmadani.elmadanistudio.ui.StoreApp
+import com.samielmadani.elmadanistudio.ui.theme.ElmadaniStudioTheme
+import com.samielmadani.elmadanistudio.ui.theme.ThemeSettings
+import com.samielmadani.elmadanistudio.worker.UpdateScheduler
 
 class MainActivity : ComponentActivity() {
     private val openRepo = mutableStateOf<String?>(null)
@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
         ThemeSettings.initialize(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val dark = when (ThemeSettings.mode.value) {
-            com.samielmadani.elmadanistore.data.ThemeMode.DARK, com.samielmadani.elmadanistore.data.ThemeMode.OLED -> true
+            com.samielmadani.elmadanistudio.data.ThemeMode.DARK, com.samielmadani.elmadanistudio.data.ThemeMode.OLED -> true
             else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         }
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = !dark
@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
         }
         UpdateScheduler.schedule(this)
         setContent {
-            ElmadaniStoreTheme {
+            ElmadaniStudioTheme {
                 StoreApp(initialRepo = openRepo.value)
             }
         }

@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.ui
+package com.samielmadani.elmadanistudio.ui
 
 import android.content.Context
 import android.content.Intent
@@ -104,11 +104,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.samielmadani.elmadanistore.CrashReporter
-import com.samielmadani.elmadanistore.data.SortMode
-import com.samielmadani.elmadanistore.data.StoreApp
-import com.samielmadani.elmadanistore.data.ThemeMode
-import com.samielmadani.elmadanistore.ui.theme.ThemeSettings
+import com.samielmadani.elmadanistudio.CrashReporter
+import com.samielmadani.elmadanistudio.data.SortMode
+import com.samielmadani.elmadanistudio.data.StoreApp
+import com.samielmadani.elmadanistudio.data.ThemeMode
+import com.samielmadani.elmadanistudio.ui.theme.ThemeSettings
 import kotlinx.coroutines.launch
 
 private enum class TopLevelPage { Apps, Websites, Settings }
@@ -340,7 +340,7 @@ private fun HomePage(
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Elmadani Store", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Elmadani Studio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("Personal app catalogue", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick = openSort) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort apps") }
@@ -603,15 +603,15 @@ private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings
     var token by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(false) }
     val rateLimit by vm.rateLimit.collectAsState()
-    val feedbackSubject = Uri.encode("Elmadani Store feedback")
-    val feedbackBody = Uri.encode("I'd like to share feedback about Elmadani Store.\n\nApp version: ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}\nAndroid: ${Build.VERSION.RELEASE}\n")
+    val feedbackSubject = Uri.encode("Elmadani Studio feedback")
+    val feedbackBody = Uri.encode("I'd like to share feedback about Elmadani Studio.\n\nApp version: ${context.packageManager.getPackageInfo(context.packageName, 0).versionName}\nAndroid: ${Build.VERSION.RELEASE}\n")
 
     Scaffold { padding ->
         Column(Modifier.padding(padding).padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(22.dp)) {
             Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f))) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("About Elmadani Store", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("About Elmadani Studio", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text("Built by Sami Elmadani, a software engineer based in Christchurch, New Zealand.", style = MaterialTheme.typography.bodyMedium)
                     Text("This app is not on the Play Store because it installs and updates apps directly from trusted GitHub releases outside the Play Store rules.", style = MaterialTheme.typography.bodyMedium)
                     Text("Last updated: ${selfUpdate?.lastUpdatedText ?: "Unknown"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -643,8 +643,8 @@ private fun SettingsPage(vm: StoreViewModel, selfUpdate: StoreApp?, openSettings
             Text("Storage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             OutlinedButton(onClick = vm::clearDownloads, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Icon(Icons.Default.Close, null); Spacer(Modifier.width(8.dp)); Text("Clear cached app files") }
             Button(onClick = openSettings, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(percent = 50)) { Text("Open install settings") }
-            TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Elmadani Store debug export\nPackage: ${context.packageName}\nAndroid: ${Build.VERSION.RELEASE}"), "Export logs")) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Export debug logs") }
-            Text("Updates are checked when Elmadani Store refreshes. Background checks will notify you when a newer update is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Elmadani Studio debug export\nPackage: ${context.packageName}\nAndroid: ${Build.VERSION.RELEASE}"), "Export logs")) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Export debug logs") }
+            Text("Updates are checked when Elmadani Studio refreshes. Background checks will notify you when a newer update is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -680,7 +680,7 @@ private fun Section(title: String, content: @Composable () -> Unit) { Column(ver
 @Composable
 private fun OnboardingScreen(onComplete: () -> Unit, onSkip: () -> Unit) {
     val pages = listOf(
-        "Elmadani Store helps you find apps and keep them updated from trusted GitHub releases.",
+        "Elmadani Studio helps you find apps and keep them updated from trusted GitHub releases.",
         "Some apps are outside the Play Store, so Android may ask you to allow installation from this app once. That is expected and safe when you choose the app.",
         "You remain in control: you can review updates, install only what you want, and check your settings anytime."
     )

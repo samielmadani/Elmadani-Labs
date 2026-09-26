@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.worker
+package com.samielmadani.elmadanistudio.worker
 
 import android.content.Context
 import androidx.work.ExistingPeriodicWorkPolicy

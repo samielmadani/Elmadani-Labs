@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.ui.theme
+package com.samielmadani.elmadanistudio.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -10,10 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.Typography
-import com.samielmadani.elmadanistore.data.ThemeMode
+import com.samielmadani.elmadanistudio.data.ThemeMode
 
 @Composable
-fun ElmadaniStoreTheme(content: @Composable () -> Unit) {
+fun ElmadaniStudioTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val mode = ThemeSettings.mode.value
     val dark = when (mode) { ThemeMode.DARK, ThemeMode.OLED -> true; else -> isSystemInDarkTheme() }

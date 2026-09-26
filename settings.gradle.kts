@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Elmadani Store"
+rootProject.name = "Elmadani Studio"
 include(":app")

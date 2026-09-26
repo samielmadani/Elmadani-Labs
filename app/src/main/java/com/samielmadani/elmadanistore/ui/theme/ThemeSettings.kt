@@ -1,9 +1,9 @@
-package com.samielmadani.elmadanistore.ui.theme
+package com.samielmadani.elmadanistudio.ui.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.mutableStateOf
 import android.content.Context
-import com.samielmadani.elmadanistore.data.ThemeMode
+import com.samielmadani.elmadanistudio.data.ThemeMode
 
 object ThemeSettings {
     val mode = mutableStateOf(ThemeMode.SYSTEM)

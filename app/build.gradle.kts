@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.samielmadani.elmadanistore"
+    namespace = "com.samielmadani.elmadanistudio"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.samielmadani.elmadanistore"
+        applicationId = "com.samielmadani.elmadanistudio"
         minSdk = 26
         targetSdk = 35
         versionCode = 2

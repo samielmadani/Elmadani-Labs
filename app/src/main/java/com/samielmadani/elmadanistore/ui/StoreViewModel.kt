@@ -1,12 +1,12 @@
-package com.samielmadani.elmadanistore.ui
+package com.samielmadani.elmadanistudio.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.samielmadani.elmadanistore.data.RateLimitStatus
-import com.samielmadani.elmadanistore.data.SortMode
-import com.samielmadani.elmadanistore.data.StoreApp
-import com.samielmadani.elmadanistore.data.StoreRepository
+import com.samielmadani.elmadanistudio.data.RateLimitStatus
+import com.samielmadani.elmadanistudio.data.SortMode
+import com.samielmadani.elmadanistudio.data.StoreApp
+import com.samielmadani.elmadanistudio.data.StoreRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

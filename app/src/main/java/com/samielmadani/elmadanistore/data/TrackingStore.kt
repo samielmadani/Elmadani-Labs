@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.data
+package com.samielmadani.elmadanistudio.data
 
 import android.content.Context
 import android.content.pm.PackageInfo

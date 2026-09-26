@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.data
+package com.samielmadani.elmadanistudio.data
 
 import android.content.Context
 import android.content.Intent
@@ -6,7 +6,7 @@ import android.net.Uri
 import android.util.Log
 import android.util.Base64
 import androidx.core.content.FileProvider
-import com.samielmadani.elmadanistore.R
+import com.samielmadani.elmadanistudio.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -22,7 +22,7 @@ class StoreRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences("store", Context.MODE_PRIVATE)
     private val trackingStore = TrackingStore(context)
     private val username = "samielmadani"
-    private val selfRepo = "samielmadani/Elmadani-Store"
+    private val selfRepo = "samielmadani/Elmadani-Studio"
     private val defaultIgnoredRepos = setOf(selfRepo)
 
     @Volatile
@@ -79,7 +79,7 @@ class StoreRepository(private val context: Context) {
         @Suppress("DEPRECATION")
         val installedCode = packageInfo?.let { if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
         val app = StoreApp(
-            owner = "samielmadani", repo = "Elmadani-Store", name = "Elmadani Store",
+            owner = "samielmadani", repo = "Elmadani-Studio", name = "Elmadani Studio",
             description = "The store application", iconUrl = "android.resource://${context.packageName}/${R.mipmap.ic_launcher}",
             repositoryUrl = "https://github.com/$selfRepo", releaseId = release.optLong("id"),
             version = release.optString("tag_name"), releaseNotes = release.optString("body"),
@@ -97,7 +97,7 @@ class StoreRepository(private val context: Context) {
 
     suspend fun download(app: StoreApp, onProgress: (Int) -> Unit): File = withContext(Dispatchers.IO) {
         val target = File(context.cacheDir, "${app.repo}-${app.version}.apk")
-        val request = Request.Builder().url(app.downloadUrl).header("User-Agent", "Elmadani-Store").build()
+        val request = Request.Builder().url(app.downloadUrl).header("User-Agent", "Elmadani-Studio").build()
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Download failed: ${response.code}" }
             val body = response.body ?: error("Empty download")
@@ -143,7 +143,7 @@ class StoreRepository(private val context: Context) {
         val cached = preferences.getString("${cacheKey}_body", null)
         val token = token()
         Log.d(TAG, "GitHub request: $url; tokenPresent=${token.isNotBlank()}; authorizationAttached=${token.isNotBlank()}; tokenLength=${token.length}")
-        val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "Elmadani-Store")
+        val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "Elmadani-Studio")
             .apply {
                 preferences.getString("${cacheKey}_etag", null)?.let { header("If-None-Match", it) }
                 token.takeIf(String::isNotBlank)?.let { header("Authorization", "Bearer $it") }
@@ -179,7 +179,7 @@ class StoreRepository(private val context: Context) {
     }
 
     private fun loadMetadata(owner: String, repo: String, assets: JSONArray): JSONObject? {
-        listOf("store.json", "elmadani-store.json").firstNotNullOfOrNull { file ->
+        listOf("store.json", "elmadani-studio.json").firstNotNullOfOrNull { file ->
             getJson("https://api.github.com/repos/$owner/$repo/contents/$file")?.let { content ->
                 content.optString("content").takeIf(String::isNotBlank)?.let { encoded ->
                     runCatching { JSONObject(String(Base64.decode(encoded.replace("\n", ""), Base64.DEFAULT))) }.getOrNull()

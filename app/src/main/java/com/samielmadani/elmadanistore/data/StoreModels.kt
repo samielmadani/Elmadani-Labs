@@ -1,4 +1,4 @@
-package com.samielmadani.elmadanistore.data
+package com.samielmadani.elmadanistudio.data
 
 import java.time.Instant
 import java.time.ZoneId

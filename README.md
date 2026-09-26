@@ -1,14 +1,14 @@
-# Elmadani Store
+# Elmadani Studio
 
 > A small Android catalogue for discovering and installing APKs from GitHub Releases.
 
 ## ✨ Why this app?
 
-Elmadani Store turns a collection of GitHub-hosted Android projects into one readable catalogue. It shows the latest downloadable APK, release notes, version history, and install state, so updating personal apps does not require opening every repository by hand.
+Elmadani Studio turns a collection of GitHub-hosted Android projects into one readable catalogue. It shows the latest downloadable APK, release notes, version history, and install state, so updating personal apps does not require opening every repository by hand.
 
 ## 📲 How to install
 
-Download the latest APK from the [GitHub Releases page](https://github.com/samielmadani/Elmadani-Store/releases/latest).
+Download the latest APK from the [GitHub Releases page](https://github.com/samielmadani/Elmadani-Studio/releases/latest).
 
 1. Download the `.apk` file on an Android device.
 2. If Android asks, allow your browser or file manager to install unknown apps.
@@ -23,7 +23,7 @@ Download the latest APK from the [GitHub Releases page](https://github.com/samie
 - **GitHub access** — accepts a personal access token for private repositories and higher API limits.
 - **Rate-limit visibility** — caches GitHub responses with ETags, reports remaining quota and reset time, and explains rate-limit failures.
 - **Personalisation** — supports Material You dynamic colors, light/dark/OLED themes, accent colors, sorting, and per-repository display-name overrides.
-- **Repository metadata** — uses a root `store.json` or `elmadani-store.json` file for a friendly app name and description.
+- **Repository metadata** — uses a root `store.json` or `elmadani-studio.json` file for a friendly app name and description.
 - **Local maintenance** — lets you clear downloaded APKs and ignore repositories from Settings.
 
 ## 🗂️ Repository metadata
