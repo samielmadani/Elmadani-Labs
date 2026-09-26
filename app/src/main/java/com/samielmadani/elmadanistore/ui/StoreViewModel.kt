@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -72,7 +73,17 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _loading.value = true
             _error.value = null
-            runCatching { repository.loadApps() }.onSuccess {
+            runCatching {
+                repository.loadApps { freshApp ->
+                    _apps.update { currentApps ->
+                        val existingIndex = currentApps.indexOfFirst {
+                            it.owner.equals(freshApp.owner, ignoreCase = true) && it.repo.equals(freshApp.repo, ignoreCase = true)
+                        }
+                        if (existingIndex < 0) currentApps + freshApp
+                        else currentApps.toMutableList().also { it[existingIndex] = freshApp }
+                    }
+                }
+            }.onSuccess {
                 _apps.value = it
                 _selfUpdate.value = repository.latestSelfUpdate
                 val updates = pendingUpdates().filter { app -> announcedReleases.add("${app.owner}/${app.repo}:${app.releaseId}") }

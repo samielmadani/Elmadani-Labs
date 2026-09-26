@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -215,22 +216,44 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
     Box(Modifier.fillMaxSize()) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             when (TopLevelPage.entries[page]) {
-                TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
+                TopLevelPage.Apps -> HomePage(apps, selfUpdate, loading, error, progress, failedDownloads, pendingUpdates, updateNotice != null, storeViewModel, { selectedApp = it }, { sortSheetOpen.value = true }, sortSheetOpen.value, { sortSheetOpen.value = false }, { app -> handleInstall(app) }, { app -> handleInstall(app) }, { handleUpdateAll() })
                 TopLevelPage.Websites -> WebsitesPage()
                 TopLevelPage.Settings -> SettingsPage(storeViewModel, selfUpdate, { openUnknownSources() })
             }
         }
-        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
-        Card(
-            shape = RoundedCornerShape(28.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 16.dp)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FloatingNavigationButton("Apps", Icons.Default.CloudDownload, selectedPage == TopLevelPage.Apps.ordinal, pendingUpdates.size, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } })
-                FloatingNavigationButton("Websites", Icons.Default.Language, selectedPage == TopLevelPage.Websites.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } })
-                FloatingNavigationButton("Settings", Icons.Default.Settings, selectedPage == TopLevelPage.Settings.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } })
+            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.fillMaxWidth()) { data ->
+                val noticeApp = updateNotice?.takeIf { it.message == data.visuals.message }?.app
+                val actionLabel = data.visuals.actionLabel
+                if (noticeApp != null && actionLabel != null) {
+                    UpdateAvailableToast(
+                        app = noticeApp,
+                        message = data.visuals.message,
+                        actionLabel = actionLabel,
+                        onAction = data::performAction
+                    )
+                } else {
+                    androidx.compose.material3.Snackbar(snackbarData = data)
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FloatingNavigationButton("Apps", Icons.Default.CloudDownload, selectedPage == TopLevelPage.Apps.ordinal, pendingUpdates.size, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Apps.ordinal) } })
+                    FloatingNavigationButton("Websites", Icons.Default.Language, selectedPage == TopLevelPage.Websites.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Websites.ordinal) } })
+                    FloatingNavigationButton("Settings", Icons.Default.Settings, selectedPage == TopLevelPage.Settings.ordinal, 0, onClick = { scope.launch { pagerState.animateScrollToPage(TopLevelPage.Settings.ordinal) } })
+                }
             }
         }
     }
@@ -273,6 +296,36 @@ fun StoreApp(initialRepo: String? = null, storeViewModel: StoreViewModel = viewM
 }
 
 @Composable
+private fun UpdateAvailableToast(app: StoreApp, message: String, actionLabel: String, onAction: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AsyncImage(
+                model = app.iconUrl,
+                contentDescription = "${app.name} icon",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Update available", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp), modifier = Modifier.heightIn(min = 40.dp)) {
+                Text(actionLabel, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
 private fun FloatingNavigationButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, badgeCount: Int, onClick: () -> Unit) {
     IconButton(
         onClick = onClick,
@@ -310,6 +363,7 @@ private fun HomePage(
     progress: Map<String, Int>,
     failedDownloads: Set<String>,
     pendingUpdates: List<StoreApp>,
+    updateToastVisible: Boolean,
     vm: StoreViewModel,
     openDetails: (StoreApp) -> Unit,
     openSort: () -> Unit,
@@ -335,7 +389,7 @@ private fun HomePage(
         LazyColumn(
             modifier = Modifier.padding(padding).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 112.dp)
+            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = if (updateToastVisible) 220.dp else 112.dp)
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {

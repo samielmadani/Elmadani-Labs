@@ -8,6 +8,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,101 +30,112 @@ data class TrackedAppEntity(
 
 class TrackingStore(private val context: Context) {
     private val key = stringPreferencesKey("entries")
+    private val mutex = Mutex()
 
     fun flow(): Flow<List<TrackedAppEntity>> = context.trackingDataStore.data.map { decode(it[key]) }
 
     suspend fun all(): List<TrackedAppEntity> = decode(context.trackingDataStore.data.first()[key])
 
     suspend fun recordLatest(app: StoreApp): TrackedAppEntity {
-        val current = all().associateBy { it.repo }.toMutableMap()
-        val existing = current[app.repo]
-        val entity = TrackedAppEntity(
-            repo = app.repo,
-            packageName = app.packageName ?: existing?.packageName,
-            installedVersionCode = existing?.installedVersionCode,
-            installedVersionName = existing?.installedVersionName,
-            lastCheckedAt = System.currentTimeMillis(),
-            latestVersion = app.version,
-            latestVersionCode = app.releaseVersionCode,
-            latestAssetName = app.assetName,
-            latestAssetSize = app.assetSize,
-            latestDownloadUrl = app.downloadUrl
-        )
-        current[app.repo] = entity
-        save(current.values)
-        return entity
+        return mutex.withLock {
+            val current = all().associateBy { it.repo }.toMutableMap()
+            val existing = current[app.repo]
+            val entity = TrackedAppEntity(
+                repo = app.repo,
+                packageName = app.packageName ?: existing?.packageName,
+                installedVersionCode = existing?.installedVersionCode,
+                installedVersionName = existing?.installedVersionName,
+                lastCheckedAt = System.currentTimeMillis(),
+                latestVersion = app.version,
+                latestVersionCode = app.releaseVersionCode,
+                latestAssetName = app.assetName,
+                latestAssetSize = app.assetSize,
+                latestDownloadUrl = app.downloadUrl
+            )
+            current[app.repo] = entity
+            save(current.values)
+            entity
+        }
     }
 
     suspend fun reconcileInstalled(app: StoreApp): TrackedAppEntity? {
-        val current = all().associateBy { it.repo }.toMutableMap()
-        val existing = current[app.repo] ?: return null
-        val packageName = existing.packageName ?: app.packageName ?: return existing
-        val installed = runCatching {
-            @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(packageName, 0)
-        }.getOrNull()
-        val entity = existing.copy(
-            packageName = packageName,
-            installedVersionCode = installed?.let(::versionCode),
-            installedVersionName = installed?.versionName
-        )
-        current[app.repo] = entity
-        save(current.values)
-        return entity
+        return mutex.withLock {
+            val current = all().associateBy { it.repo }.toMutableMap()
+            val existing = current[app.repo] ?: return@withLock null
+            val packageName = existing.packageName ?: app.packageName ?: return@withLock existing
+            val installed = runCatching {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(packageName, 0)
+            }.getOrNull()
+            val entity = existing.copy(
+                packageName = packageName,
+                installedVersionCode = installed?.let(::versionCode),
+                installedVersionName = installed?.versionName
+            )
+            current[app.repo] = entity
+            save(current.values)
+            entity
+        }
     }
 
     suspend fun updatePackageName(repo: String, packageName: String) {
-        val current = all().associateBy { it.repo }.toMutableMap()
-        current[repo]?.let { current[repo] = it.copy(packageName = packageName) }
-        save(current.values)
+        mutex.withLock {
+            val current = all().associateBy { it.repo }.toMutableMap()
+            current[repo]?.let { current[repo] = it.copy(packageName = packageName) }
+            save(current.values)
+        }
     }
 
     suspend fun markPackageInstalled(packageName: String): TrackedAppEntity? {
-        val current = all().associateBy { it.repo }.toMutableMap()
-        val existing = current.values.firstOrNull { it.packageName == packageName } ?: return null
-        val installed = runCatching {
-            @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(packageName, 0)
-        }.getOrNull() ?: return null
-        val entity = existing.copy(
-            installedVersionCode = versionCode(installed),
-            installedVersionName = installed.versionName
-        )
-        current[entity.repo] = entity
-        save(current.values)
-        return entity
+        return mutex.withLock {
+            val current = all().associateBy { it.repo }.toMutableMap()
+            val existing = current.values.firstOrNull { it.packageName == packageName } ?: return@withLock null
+            val installed = runCatching {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(packageName, 0)
+            }.getOrNull() ?: return@withLock null
+            val entity = existing.copy(
+                installedVersionCode = versionCode(installed),
+                installedVersionName = installed.versionName
+            )
+            current[entity.repo] = entity
+            save(current.values)
+            entity
+        }
     }
 
     suspend fun markInstalled(app: StoreApp): TrackedAppEntity? {
-        val current = all().associateBy { it.repo }.toMutableMap()
-        val existing = current[app.repo]
-        val packageName = app.packageName ?: existing?.packageName ?: return existing
-        val entity = (existing ?: TrackedAppEntity(
-            repo = app.repo,
-            packageName = packageName,
-            installedVersionCode = null,
-            installedVersionName = null,
-            lastCheckedAt = 0L,
-            latestVersion = app.version,
-            latestVersionCode = app.releaseVersionCode,
-            latestAssetName = app.assetName,
-            latestAssetSize = app.assetSize,
-            latestDownloadUrl = app.downloadUrl
-        )).copy(
-            repo = app.repo,
-            packageName = packageName,
-            installedVersionCode = app.releaseVersionCode ?: existing?.installedVersionCode,
-            installedVersionName = app.version.ifBlank { existing?.installedVersionName },
-            lastCheckedAt = System.currentTimeMillis(),
-            latestVersion = app.version,
-            latestVersionCode = app.releaseVersionCode,
-            latestAssetName = app.assetName,
-            latestAssetSize = app.assetSize,
-            latestDownloadUrl = app.downloadUrl
-        )
-        current[app.repo] = entity
-        save(current.values)
-        return entity
+        return mutex.withLock {
+            val current = all().associateBy { it.repo }.toMutableMap()
+            val existing = current[app.repo]
+            val packageName = app.packageName ?: existing?.packageName ?: return@withLock existing
+            val entity = (existing ?: TrackedAppEntity(
+                repo = app.repo,
+                packageName = packageName,
+                installedVersionCode = null,
+                installedVersionName = null,
+                lastCheckedAt = 0L,
+                latestVersion = app.version,
+                latestVersionCode = app.releaseVersionCode,
+                latestAssetName = app.assetName,
+                latestAssetSize = app.assetSize,
+                latestDownloadUrl = app.downloadUrl
+            )).copy(
+                repo = app.repo,
+                packageName = packageName,
+                installedVersionCode = app.releaseVersionCode ?: existing?.installedVersionCode,
+                installedVersionName = app.version.ifBlank { existing?.installedVersionName },
+                lastCheckedAt = System.currentTimeMillis(),
+                latestVersion = app.version,
+                latestVersionCode = app.releaseVersionCode,
+                latestAssetName = app.assetName,
+                latestAssetSize = app.assetSize,
+                latestDownloadUrl = app.downloadUrl
+            )
+            current[app.repo] = entity
+            save(current.values)
+            entity
+        }
     }
 
     private suspend fun save(entries: Collection<TrackedAppEntity>) {

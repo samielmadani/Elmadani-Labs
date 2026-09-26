@@ -8,8 +8,13 @@ import android.util.Base64
 import androidx.core.content.FileProvider
 import com.samielmadani.elmadanistudio.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -33,18 +38,46 @@ class StoreRepository(private val context: Context) {
     var rateLimitStatus: RateLimitStatus = RateLimitStatus()
         private set
 
-    suspend fun loadApps(): List<StoreApp> = withContext(Dispatchers.IO) {
-        val repositories = getJsonArray("https://api.github.com/users/$username/repos?type=owner&per_page=100", reportHttpError = true) ?: return@withContext emptyList()
-        val ignored = ignoredRepos()
-        val repoObjects = (0 until repositories.length()).mapNotNull { repositories.optJSONObject(it) }
-            .filterNot { ignored.contains(repoKey(username, it.optString("name"))) }
-        val apps = repoObjects.mapNotNull { repo ->
-            val owner = repo.optJSONObject("owner")?.optString("login") ?: username
-            val name = repo.optString("name")
-            if (name.isBlank() || ignored.contains(repoKey(owner, name))) return@mapNotNull null
-            val release = getJson("https://api.github.com/repos/$owner/$name/releases/latest") ?: return@mapNotNull null
-            val assets = release.optJSONArray("assets") ?: return@mapNotNull null
-            val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk", true) } ?: return@mapNotNull null
+    suspend fun loadApps(onAppUpdated: (StoreApp) -> Unit = {}): List<StoreApp> = withContext(Dispatchers.IO) {
+        val refreshStartedAt = System.nanoTime()
+        Log.d(TAG, "Refresh started")
+        try {
+            val repositories = getJsonArray("https://api.github.com/users/$username/repos?type=owner&per_page=100", reportHttpError = true) ?: return@withContext emptyList()
+            val ignored = ignoredRepos()
+            val repoObjects = (0 until repositories.length()).mapNotNull { repositories.optJSONObject(it) }
+                .filterNot { ignored.contains(repoKey(username, it.optString("name"))) }
+            val limit = Semaphore(REPO_CONCURRENCY)
+            val (apps, selfUpdate) = coroutineScope {
+                val selfUpdateTask = async { loadSelfUpdate() }
+                val appTasks = repoObjects.map { repo ->
+                    async {
+                        limit.withPermit {
+                            val app = loadRepoApp(repo, ignored)
+                            if (app != null) onAppUpdated(app)
+                            app
+                        }
+                    }
+                }
+                appTasks.awaitAll().filterNotNull() to selfUpdateTask.await()
+            }
+            preferences.edit().putString("apps_cache", apps.joinToString("\n") { "${it.owner}|${it.repo}|${it.version}|${it.description}" }).apply()
+            latestSelfUpdate = selfUpdate
+            apps
+        } finally {
+            Log.d(TAG, "Refresh finished in ${elapsedMillis(refreshStartedAt)} ms")
+        }
+    }
+
+    private suspend fun loadRepoApp(repo: JSONObject, ignored: Set<String>): StoreApp? {
+        val owner = repo.optJSONObject("owner")?.optString("login") ?: username
+        val name = repo.optString("name")
+        if (name.isBlank() || ignored.contains(repoKey(owner, name))) return null
+        val startedAt = System.nanoTime()
+        Log.d(TAG, "Repo refresh started: $owner/$name")
+        try {
+            val release = getJson("https://api.github.com/repos/$owner/$name/releases/latest") ?: return null
+            val assets = release.optJSONArray("assets") ?: return null
+            val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk", true) } ?: return null
             val metadata = loadMetadata(owner, name, assets)
             val packageName = metadata?.optString("packageName").orEmpty().ifBlank { null }
             val releaseVersionCode = metadata?.optLong("versionCode")?.takeIf { it > 0L }
@@ -63,11 +96,10 @@ class StoreRepository(private val context: Context) {
             val app = StoreApp(owner = owner, repo = name, name = displayName, description = description, iconUrl = iconFor(owner, name), repositoryUrl = "https://github.com/$owner/$name", releaseId = release.optLong("id"), version = release.optString("tag_name"), releaseNotes = release.optString("body"), publishedAt = release.optString("published_at"), assetName = apk.optString("name"), assetSize = apk.optLong("size"), downloadUrl = apk.optString("browser_download_url"), prerelease = release.optBoolean("prerelease"), packageName = packageName, releaseVersionCode = releaseVersionCode, releases = history)
             val tracked = trackingStore.recordLatest(app)
             val reconciled = trackingStore.reconcileInstalled(app)
-            app.copy(installedVersion = reconciled?.installedVersionName ?: tracked.installedVersionName, installedVersionCode = reconciled?.installedVersionCode ?: tracked.installedVersionCode)
+            return app.copy(installedVersion = reconciled?.installedVersionName ?: tracked.installedVersionName, installedVersionCode = reconciled?.installedVersionCode ?: tracked.installedVersionCode)
+        } finally {
+            Log.d(TAG, "Repo refresh finished: $owner/$name in ${elapsedMillis(startedAt)} ms")
         }
-        preferences.edit().putString("apps_cache", apps.joinToString("\n") { "${it.owner}|${it.repo}|${it.version}|${it.description}" }).apply()
-        latestSelfUpdate = loadSelfUpdate()
-        apps
     }
 
     private suspend fun loadSelfUpdate(): StoreApp? {
@@ -138,35 +170,48 @@ class StoreRepository(private val context: Context) {
 
     private fun getJsonArray(url: String, reportHttpError: Boolean = false): JSONArray? = request(url, reportHttpError)?.let { runCatching { JSONArray(it) }.getOrNull() }
 
-    private fun request(url: String, reportHttpError: Boolean = false): String? = runCatching {
+    private fun request(url: String, reportHttpError: Boolean = false): String? {
         val cacheKey = "cache_${url.hashCode()}"
         val cached = preferences.getString("${cacheKey}_body", null)
+        val etag = preferences.getString("${cacheKey}_etag", null)
         val token = token()
-        Log.d(TAG, "GitHub request: $url; tokenPresent=${token.isNotBlank()}; authorizationAttached=${token.isNotBlank()}; tokenLength=${token.length}")
-        val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "Elmadani-Studio")
+        val startedAt = System.nanoTime()
+        var outcome = "failed"
+        return runCatching {
+            val request = Request.Builder().url(url).header("Accept", "application/vnd.github+json").header("User-Agent", "Elmadani-Studio")
             .apply {
-                preferences.getString("${cacheKey}_etag", null)?.let { header("If-None-Match", it) }
+                etag?.let { header("If-None-Match", it) }
                 token.takeIf(String::isNotBlank)?.let { header("Authorization", "Bearer $it") }
             }.build()
-        client.newCall(request).execute().use { response ->
-            updateRateLimit(response)
-            val body = response.body?.string().orEmpty()
-            Log.d(TAG, "GitHub response: ${response.code} ${response.message}; body=${body.take(LOG_BODY_LIMIT)}")
-            when {
-                response.code == 304 -> cached
-                response.code == 403 && response.header("X-RateLimit-Remaining") == "0" -> throw RateLimitException(rateLimitStatus.resetAt)
-                response.isSuccessful -> body.also {
-                    preferences.edit().putString("${cacheKey}_body", body).apply()
-                    response.header("ETag")?.let { preferences.edit().putString("${cacheKey}_etag", it).apply() }
+            client.newCall(request).execute().use { response ->
+                updateRateLimit(response)
+                val body = response.body?.string().orEmpty()
+                when {
+                    response.code == 304 -> {
+                        outcome = if (cached == null) "304-without-body" else "304-cache-hit"
+                        cached
+                    }
+                    response.code == 403 && response.header("X-RateLimit-Remaining") == "0" -> throw RateLimitException(rateLimitStatus.resetAt)
+                    response.isSuccessful -> {
+                        outcome = if (etag != null) "${response.code}-cache-revalidated" else "${response.code}-cache-miss"
+                        preferences.edit().putString("${cacheKey}_body", body).apply()
+                        response.header("ETag")?.let { preferences.edit().putString("${cacheKey}_etag", it).apply() }
+                        body
+                    }
+                    reportHttpError -> throw GithubApiException(response.code, body)
+                    else -> {
+                        outcome = "${response.code}-error"
+                        null
+                    }
                 }
-                reportHttpError -> throw GithubApiException(response.code, body)
-                else -> null
             }
+        }.getOrElse { error ->
+            if (error is RateLimitException || error is GithubApiException) throw error
+            Log.e(TAG, "GitHub request failed: $url", error)
+            null
+        }.also {
+            Log.d(TAG, "GitHub request finished: $url outcome=$outcome in ${elapsedMillis(startedAt)} ms")
         }
-    }.getOrElse { error ->
-        if (error is RateLimitException || error is GithubApiException) throw error
-        Log.e(TAG, "GitHub request failed: $url", error)
-        null
     }
 
     private fun updateRateLimit(response: okhttp3.Response) {
@@ -201,10 +246,11 @@ class StoreRepository(private val context: Context) {
 
     private fun repoKey(owner: String, repo: String) = "${owner.lowercase()}/${repo.lowercase()}"
     private fun normaliseRepo(value: String) = value.trim().trim('/').lowercase()
+    private fun elapsedMillis(startedAt: Long) = (System.nanoTime() - startedAt) / 1_000_000
 
     private companion object {
         const val TAG = "StoreRepository"
-        const val LOG_BODY_LIMIT = 500
+        const val REPO_CONCURRENCY = 4
     }
 }
 
