@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -23,6 +25,8 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     val apps: StateFlow<List<StoreApp>> = _apps.asStateFlow()
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
+    private val _refreshingRepos = MutableStateFlow<Set<String>>(emptySet())
+    val refreshingRepos: StateFlow<Set<String>> = _refreshingRepos.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
@@ -36,9 +40,11 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateNotice = MutableStateFlow<UpdateNotice?>(null)
     val updateNotice: StateFlow<UpdateNotice?> = _updateNotice.asStateFlow()
     private val announcedReleases = mutableSetOf<String>()
-    private var lastManualRefresh = 0L
+    private var refreshJob: Job? = null
 
     init {
+        _apps.value = repository.cachedApps()
+        _loading.value = _apps.value.isEmpty()
         viewModelScope.launch {
             repository.trackedApps().collectLatest { trackedApps ->
                 val trackedByRepo = trackedApps.associateBy { it.repo.lowercase() }
@@ -66,15 +72,15 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        val now = System.currentTimeMillis()
-        if (repository.isManualRefreshThrottled(now) || (_apps.value.isNotEmpty() && now - lastManualRefresh < 60_000L)) return
-        lastManualRefresh = now
-        repository.markManualRefresh(now)
-        viewModelScope.launch {
-            _loading.value = true
+        if (refreshJob?.isActive == true) return
+        repository.markManualRefresh()
+        refreshJob = viewModelScope.launch {
+            _loading.value = _apps.value.isEmpty()
+            _refreshingRepos.value = _apps.value.map { it.repo.lowercase() }.toSet()
             _error.value = null
-            runCatching {
-                repository.loadApps { freshApp ->
+            try {
+                val result = repository.loadApps { freshApp ->
+                    _refreshingRepos.update { it - freshApp.repo.lowercase() }
                     _apps.update { currentApps ->
                         val existingIndex = currentApps.indexOfFirst {
                             it.owner.equals(freshApp.owner, ignoreCase = true) && it.repo.equals(freshApp.repo, ignoreCase = true)
@@ -83,17 +89,23 @@ class StoreViewModel(application: Application) : AndroidViewModel(application) {
                         else currentApps.toMutableList().also { it[existingIndex] = freshApp }
                     }
                 }
-            }.onSuccess {
-                _apps.value = it
+                if (result.isNotEmpty()) _apps.value = result
                 _selfUpdate.value = repository.latestSelfUpdate
                 val updates = pendingUpdates().filter { app -> announcedReleases.add("${app.owner}/${app.repo}:${app.releaseId}") }
                 if (updates.isNotEmpty()) {
                     val app = updates.first()
                     _updateNotice.value = UpdateNotice(app, if (updates.size == 1) "${app.name} update available" else "${updates.size} updates available")
                 }
-            }.onFailure { _error.value = it.message ?: "Could not connect to GitHub" }
-            _rateLimit.value = repository.rateLimitStatus
-            _loading.value = false
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _error.value = error.message ?: "Could not connect to GitHub"
+            } finally {
+                _refreshingRepos.value = emptySet()
+                _rateLimit.value = repository.rateLimitStatus
+                _loading.value = false
+                refreshJob = null
+            }
         }
     }
 

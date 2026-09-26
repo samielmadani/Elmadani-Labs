@@ -91,4 +91,4 @@ data class ReleaseSummary(
 }
 
 enum class SortMode(val label: String) { NAME("Name"), UPDATED("Recently updated"), INSTALLED("Install status") }
-enum class ThemeMode { SYSTEM, LIGHT, DARK, OLED }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, OLED, LIQUID_GLASS }

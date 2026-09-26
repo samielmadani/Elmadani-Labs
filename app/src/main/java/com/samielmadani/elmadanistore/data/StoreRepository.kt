@@ -60,9 +60,17 @@ class StoreRepository(private val context: Context) {
                 }
                 appTasks.awaitAll().filterNotNull() to selfUpdateTask.await()
             }
-            preferences.edit().putString("apps_cache", apps.joinToString("\n") { "${it.owner}|${it.repo}|${it.version}|${it.description}" }).apply()
+            val currentRepoKeys = repoObjects.mapNotNull { it.optString("name").takeIf(String::isNotBlank)?.let { name -> repoKey(username, name) } }.toSet()
+            val cachedByRepo = cachedApps().filter { repoKey(it.owner, it.repo) in currentRepoKeys }.associateBy { repoKey(it.owner, it.repo) }
+            val freshByRepo = apps.associateBy { repoKey(it.owner, it.repo) }
+            val mergedApps = repoObjects.mapNotNull { repo ->
+                val owner = repo.optJSONObject("owner")?.optString("login") ?: username
+                val key = repoKey(owner, repo.optString("name"))
+                freshByRepo[key] ?: cachedByRepo[key]
+            }
+            preferences.edit().putString("apps_cache", JSONArray().apply { mergedApps.forEach { put(it.toCacheJson()) } }.toString()).apply()
             latestSelfUpdate = selfUpdate
-            apps
+            mergedApps
         } finally {
             Log.d(TAG, "Refresh finished in ${elapsedMillis(refreshStartedAt)} ms")
         }
@@ -157,6 +165,38 @@ class StoreRepository(private val context: Context) {
 
     fun clearDownloads() { context.cacheDir.listFiles()?.filter { it.extension == "apk" }?.forEach(File::delete) }
     fun token(): String = preferences.getString("github_token", "").orEmpty()
+    fun cachedApps(): List<StoreApp> {
+        val cached = preferences.getString("apps_cache", null) ?: return emptyList()
+        if (!cached.trimStart().startsWith("[")) {
+            return cached.lineSequence().mapNotNull { line ->
+                val fields = line.split('|', limit = 4)
+                if (fields.size < 3 || fields[0].isBlank() || fields[1].isBlank()) return@mapNotNull null
+                StoreApp(
+                    owner = fields[0],
+                    repo = fields[1],
+                    name = fields[1],
+                    description = fields.getOrElse(3) { "No description provided." }.ifBlank { "No description provided." },
+                    iconUrl = iconFor(fields[0], fields[1]),
+                    repositoryUrl = "https://github.com/${fields[0]}/${fields[1]}",
+                    releaseId = 0L,
+                    version = fields[2],
+                    releaseNotes = "",
+                    publishedAt = "",
+                    assetName = "",
+                    assetSize = 0L,
+                    downloadUrl = "",
+                    prerelease = false
+                )
+            }.toList()
+        }
+        return runCatching {
+        val json = JSONArray(cached)
+        (0 until json.length()).mapNotNull { index ->
+            runCatching { json.getJSONObject(index).toStoreApp() }.getOrNull()
+        }
+        }.getOrDefault(emptyList())
+    }
+
     fun saveToken(value: String) { preferences.edit().putString("github_token", value.trim()).apply() }
     fun isManualRefreshThrottled(now: Long = System.currentTimeMillis()) = now - preferences.getLong("manual_refresh_at", 0L) < 60_000L
     fun markManualRefresh(now: Long = System.currentTimeMillis()) { preferences.edit().putLong("manual_refresh_at", now).apply() }
@@ -205,7 +245,7 @@ class StoreRepository(private val context: Context) {
                 }
             }
         }.getOrElse { error ->
-            if (error is RateLimitException || error is GithubApiException) throw error
+            if (error is RateLimitException || error is GithubApiException || reportHttpError) throw error
             Log.e(TAG, "GitHub request failed: $url", error)
             null
         }.also {
@@ -245,6 +285,82 @@ class StoreRepository(private val context: Context) {
     private fun iconFor(owner: String, repo: String) = "https://raw.githubusercontent.com/$owner/$repo/main/public/icon-512.png"
 
     private fun JSONArray.metadataAsset(): JSONObject? = (0 until length()).mapNotNull { optJSONObject(it) }.firstOrNull { it.optString("name").equals("elmadani-app.json", true) }
+
+    private fun StoreApp.toCacheJson() = JSONObject().apply {
+        put("owner", owner)
+        put("repo", repo)
+        put("name", name)
+        put("description", description.take(500))
+        put("iconUrl", iconUrl ?: JSONObject.NULL)
+        put("repositoryUrl", repositoryUrl)
+        put("releaseId", releaseId)
+        put("version", version)
+        put("releaseNotes", releaseNotes.take(1_000))
+        put("publishedAt", publishedAt)
+        put("assetName", assetName)
+        put("assetSize", assetSize)
+        put("downloadUrl", downloadUrl)
+        put("prerelease", prerelease)
+        put("packageName", packageName ?: JSONObject.NULL)
+        put("releaseVersionCode", releaseVersionCode ?: JSONObject.NULL)
+        put("installedVersion", installedVersion ?: JSONObject.NULL)
+        put("installedVersionCode", installedVersionCode ?: JSONObject.NULL)
+        put("releases", JSONArray().apply {
+            releases.take(5).forEach { release ->
+                put(JSONObject().apply {
+                    put("version", release.version)
+                    put("notes", release.notes.take(300))
+                    put("publishedAt", release.publishedAt)
+                    put("assetName", release.assetName)
+                    put("assetSize", release.assetSize)
+                    put("downloadUrl", release.downloadUrl)
+                    put("prerelease", release.prerelease)
+                })
+            }
+        })
+    }
+
+    private fun JSONObject.toStoreApp() = StoreApp(
+        owner = getString("owner"),
+        repo = getString("repo"),
+        name = getString("name"),
+        description = getString("description"),
+        iconUrl = optNullableString("iconUrl"),
+        repositoryUrl = getString("repositoryUrl"),
+        releaseId = getLong("releaseId"),
+        version = getString("version"),
+        releaseNotes = getString("releaseNotes"),
+        publishedAt = getString("publishedAt"),
+        assetName = getString("assetName"),
+        assetSize = getLong("assetSize"),
+        downloadUrl = getString("downloadUrl"),
+        prerelease = getBoolean("prerelease"),
+        packageName = optNullableString("packageName"),
+        releaseVersionCode = optNullableLong("releaseVersionCode"),
+        installedVersion = optNullableString("installedVersion"),
+        installedVersionCode = optNullableLong("installedVersionCode"),
+        releases = optJSONArray("releases")?.let { items ->
+            (0 until items.length()).mapNotNull { index ->
+                items.optJSONObject(index)?.let { release ->
+                    ReleaseSummary(
+                        version = release.optString("version"),
+                        notes = release.optString("notes"),
+                        publishedAt = release.optString("publishedAt"),
+                        assetName = release.optString("assetName"),
+                        assetSize = release.optLong("assetSize"),
+                        downloadUrl = release.optString("downloadUrl"),
+                        prerelease = release.optBoolean("prerelease")
+                    )
+                }
+            }
+        }.orEmpty()
+    )
+
+    private fun JSONObject.optNullableString(name: String): String? =
+        if (isNull(name)) null else optString(name).takeUnless { it == "null" }
+
+    private fun JSONObject.optNullableLong(name: String): Long? =
+        if (isNull(name)) null else optLong(name)
 
     private fun normalizeDescription(raw: String?): String? = raw?.trim()?.takeUnless { it.equals("null", true) || it.equals("<null>", true) }?.takeIf { it.isNotBlank() }
 
